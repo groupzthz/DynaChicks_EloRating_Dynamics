@@ -126,9 +126,7 @@ elo_analysis = function(dataset, Individuals, all = FALSE){
   origElo = elo.seq(winner = winners, loser = losers, 
                     Date = date,runcheck = TRUE, startvalue = 0, k = 200)
   #index of hierarchy stability
-  stab = stab_elo(origElo)
-
-  #maybe add stability estimate between last day of young to first or second day of mature
+  summary = summary(origElo)
   
   newElo = elo_scores(winners=winners,losers=losers,
                     identities = Individuals, randomise=FALSE)
@@ -228,7 +226,7 @@ elo_analysis = function(dataset, Individuals, all = FALSE){
     Individuals$rank = ranking_rand[sort(names(ranking_rand))]
     Individuals[, sum := Wins+Losses]
     
-    rankMatch = data.table(Winner = winners, Loser = losers)
+    rankMatch = data.table(Winner = winners, Loser = losers, Code = dataset$Code)
     rankMatch[, WinnerRank := Individuals$rank[match(winners, Individuals$ID)]]
     rankMatch[, LoserRank := Individuals$rank[match(losers, Individuals$ID)]]
   }else {
@@ -236,9 +234,9 @@ elo_analysis = function(dataset, Individuals, all = FALSE){
   }
   
 
-  output = list(stab,rating, hierarchy_shape,uncer_repeat,uncer_split,uncer_split_rand,
+  output = list(summary,rating, hierarchy_shape,uncer_repeat,uncer_split,uncer_split_rand,
                 rating_rand,comp_rating, comp_elos,hierarchy_shape_rand, Individuals, rankMatch, randElo)
-  names(output) = c('stab','rating','hierarchy_shape','uncer_repeat','uncer_split','uncer_split_rand',
+  names(output) = c('summary','rating','hierarchy_shape','uncer_repeat','uncer_split','uncer_split_rand',
                 'rating_rand','comp_rating','comp_elos','hierarchy_shape_rand', 'Individuals', 'rankMatch', 'randElo')
 
   return(output)
@@ -314,21 +312,33 @@ my_plot_hierarchy_shape <-
     
     a = standard
     
+    #old formula
     #logisticModel <- nls(y~1/(1+exp(-1*(a/group.size)*r*x)), # -1 to keep growth rate positive, a/N as  
-                         #start=list(r=-1), 
-                         #control=list(maxiter=1000, minFactor=.00000000001))
+    #start=list(r=-1), 
+    #control=list(maxiter=1000, minFactor=.00000000001))
     
+    #to standardise all rank differences to a scale from 1 to 10
+    #include difference of 0 
+    x = c(0,x)
     standard_X = (x-min(x))/(max(x)-min(x))*10
-    logisticModel <- nls(y~1/(1+exp(-1*r*standard_X)), # -1 to keep growth rate positive, a/N as  
-                          start=list(r=-1), 
-                          control=list(maxiter=1000, minFactor=.00000000001))
-
-
+    #baseline-probability that higher ranking individual wins -> b = 0, probability = 0.5
+    b = 0
+    base_prob = 1/(1+exp(b)) 
+    y = c(base_prob, y)
+    logisticModel <- nls(y~1/(1+exp(-1*r*standard_X + b)), # -1 to keep growth rate positive, a/N as  
+                         start=list(r=-1), 
+                         control=list(maxiter=1000, minFactor=.00000000001))
+    
+    
     growth.rate = coef(logisticModel)
     library(nlstools)
-    confint_Rate = confint2(logisticModel, method = "asymptotic")
     
-    plotdata = data.table(RankDiff = x, ProbWin = y)
+    if(sum(y<1)/length(y) > 0.2){
+      confint_Rate = confint2(logisticModel, method = "asymptotic")
+    }else { confint_Rate = "Not computable, more than 80% > 1"}
+    
+    
+    plotdata = data.table(RankDiff = x[-1], ProbWin = y[-1], Predict = predict(logisticModel)[-1])
     
     if(length(x) %% 2 == 0){
       breaks.x = seq(2,length(x),2)
@@ -336,23 +346,23 @@ my_plot_hierarchy_shape <-
     
     library(scales)
     plot = ggplot(plotdata, aes(x = RankDiff, y= ProbWin))+
-            geom_point(size = 3)+
-            geom_smooth(aes(col = 'loess fit'), method = 'loess', formula = y~x, size = 1.5, se = FALSE)+
-            geom_errorbar(aes(x= RankDiff, ymin=CI.lower, ymax=CI.upper), width=.1)+
-            geom_line(aes(x=RankDiff, y=predict(logisticModel), color = "logistic fit"), size =1.5)+
-            labs(colour = "Fit function")+
-            scale_y_continuous(limits=c(0.35,1),oob = rescale_none)+
-            scale_x_continuous(breaks = breaks.x)+
-            theme_bw(base_size = 18)+
-            theme(axis.title.x = element_blank(), axis.title.y = element_blank())
+      geom_point(size = 3)+
+      geom_smooth(aes(col = 'loess fit'), method = 'loess', formula = y~x, size = 1.5, se = FALSE)+
+      geom_errorbar(aes(x= RankDiff, ymin=CI.lower, ymax=CI.upper), width=.1)+
+      geom_line(aes(x=RankDiff, y=Predict, color = "logistic fit"), size =1.5)+
+      labs(colour = "Fit function")+
+      scale_y_continuous(limits=c(0.35,1),oob = rescale_none)+
+      scale_x_continuous(breaks = breaks.x)+
+      theme_bw(base_size = 18)+
+      theme(axis.title.x = element_blank(), axis.title.y = element_blank())
     
     invisible(list(plot = plot, 
                    data = data.table(tot.Interact = totInteract,
-                                    Rank.diff=x,Prob.dom.win=y,
+                                     Rank.diff=x[-1],Prob.dom.win=y[-1],
                                      CI.upper=CI.upper,CI.lower=CI.lower),
                    rate = growth.rate,
                    confint_Rate = confint_Rate
-                   ))
+    ))
     
   }
 
@@ -411,10 +421,16 @@ my_plot_ranks <- function(ranks, ordered.by.rank=TRUE,identities=NULL,colors=NUL
   return(plot)
 }
 
-standardise_Diff = function(x) {
-  stand_x = numeric(length(x))
-  for (i in 1:length(x)){
-    stand_x[i] = (x[i]-min(x))/(max(x)-min(x))
-  }
-  return(stand_x)
+printCalculations <- function(rating){
+  cat("Summary:\n",rating$summary)
+  cat("\n \n Steepness:\n", rating$hierarchy_shape$rate, "Confint:",rating$hierarchy_shape$confint_Rate)
+  cat("\n \n Repeatability:\n", rating$uncer_repeat)
+  cat("\n \n Median split:\n")
+  print(rating$uncer_split)
+  cat("\n \n Randomised Split:\n",rating$uncer_split_rand[1], "Confint:", rating$uncer_split_rand[2:3])
+  cat("\n \n Comparison Original and Randomised:\n") 
+  print(rating$comp_rating)
+  print(rating$comp_elos)
+  cat("\n \n Randomised Elo: \n")
+  cat("\n Steepness:\n", rating$hierarchy_shape_rand$rate, "Confint:",rating$hierarchy_shape_rand$confint_Rate)
 }

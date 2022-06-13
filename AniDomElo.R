@@ -39,6 +39,8 @@ dataMature = dataMature[order(Date, Pen, VideoTime),]
 #check that data is complete
 dataMature[, .(minTime = min(VideoTime), maxTime = max(VideoTime)), by = .(Date,Pen)]
 
+#check order of data
+
 #split into pens
 PenAt = dataMature[Pen == "A", c(1, 3, 4,5, 7)]
 PenBt = dataMature[Pen == "B", c(1, 3, 4,5, 7)]
@@ -89,10 +91,32 @@ ratingD = elo_analysis(PenD, Individ$ID[Individ$Pen == 'D'])
 ratingE = elo_analysis(PenE, Individ$ID[Individ$Pen == 'E'])
 ratingF = elo_analysis(PenF, Individ$ID[Individ$Pen == 'F'])
 
+printCalculations(ratingA)
+printCalculations(ratingB)
+printCalculations(ratingC)
+printCalculations(ratingD)
+printCalculations(ratingE)
+printCalculations(ratingF)
 
 #######################################################################################
 
-###### DYNAMICS OF INTERACTIONS #################
+####### DATASET DESCRIPTIONS ################
+
+PenA[, .N, by = Condition]
+PenB[, .N, by = Condition]
+PenC[, .N, by = Condition]
+PenD[, .N, by = Condition]
+PenE[, .N, by = Condition]
+PenF[, .N, by = Condition]
+
+PenA[, .N, by = Code]
+PenB[, .N, by = Code]
+PenC[, .N, by = Code]
+PenD[, .N, by = Code]
+PenE[, .N, by = Code]
+PenF[, .N, by = Code]
+
+###### SUM OF INTERACTIONS #################
 
 Interact = rbind(ratingA$Individuals, ratingB$Individuals, ratingC$Individuals, ratingD$Individuals,
                  ratingE$Individuals, ratingF$Individuals)
@@ -105,18 +129,27 @@ Interact[, Condition := factor(c(rep("large", length(Pen)-60),
                                  rep("small", 60)))]
 Interact = na.omit(Interact)
 
+# ratio of Inetraction per Individual
 Interact[, ratio := sum/(sum(sum)*0.5), by = Pen]
+
+#scaled elos
+Interact[, scaleElo := scale(elos), by = Pen]
+
 Interact[order(rank), cumRatio := cumsum(ratio), by = Pen]
 Interact[order(-rank), cumRatioLow := cumsum(ratio), by = Pen]
 Interact[order(-rank), which(cumRatioLow > 0.5)[1], by = Pen]
 
-ggplot(Interact[Condition == 'small',],aes(x = rank, y = ratio, colour = Pen)) + geom_point()+geom_smooth(se = F)
-ggplot(Interact[Condition == 'large',],aes(x = rank, y = ratio, colour = Pen)) + geom_point()+geom_smooth(se = F)
+#plot ratio of interactions by individual
+ggplot(Interact[Condition == 'small',],aes(x = rank, y = ratio, colour = Pen)) + 
+  geom_point()+
+  geom_smooth(se = F)
+ggplot(Interact[Condition == 'large',],aes(x = rank, y = ratio, colour = Pen)) + 
+  geom_point()+
+  geom_smooth(se = F)
 
-#test = glmer(Interactions ~ poly(Elo,) + (1|Pen), plotdata1, family = 'poisson')
-#library(DHARMa)
-#resid.df2<- simulateResiduals(test, 1000)
-#plot(resid.df2, asFactor = T)
+# test = glmer(sum ~ poly(scaleElo,2)*Condition + (1|Pen), Interact, family = 'poisson')
+# resid.df2<- simulateResiduals(test, 1000)
+# plot(resid.df2)
 
 # Plot for Dynamics of interactions by rank (small)
 ggplot(data = Interact[Condition == 'small',], mapping = aes(x = rank, y =sum, colour = Pen)) + 
@@ -125,11 +158,6 @@ ggplot(data = Interact[Condition == 'small',], mapping = aes(x = rank, y =sum, c
   labs(y = 'Number of Interactions')+
   theme_classic(base_size = 18)
 
-ggplot(data = Interact[Condition == 'small',], mapping = aes(x = rank, y =cumRatio, colour = Pen)) + 
-  geom_line()+#method = lm, formula = y ~ splines::bs(x, 3), se = FALSE)+
-  geom_point(size = 2.5) + 
-  labs(y = 'Number of Interactions')+
-  theme_classic(base_size = 18)
 
 # Plot for Dynamics of interactions by rank (large)
 ggplot(data = Interact[Condition == 'large',], mapping = aes(x = rank, y = sum, colour = Pen)) + 
@@ -137,38 +165,33 @@ ggplot(data = Interact[Condition == 'large',], mapping = aes(x = rank, y = sum, 
   geom_point(size = 2.5) + 
   labs(y = 'Number of Interactions')+
   theme_classic(base_size = 18)
-###
 
-InteractionSmall = data.table(LoserRank = c(ratingD$rankMatch$LoserRank, 
-                                     ratingE$rankMatch$LoserRank, 
-                                     ratingF$rankMatch$LoserRank),
-                       WinnerRank = c(ratingD$rankMatch$WinnerRank, 
-                                      ratingE$rankMatch$WinnerRank, 
-                                      ratingF$rankMatch$WinnerRank),
-                       Pen = factor(c(rep('D', length(ratingD$rankMatch$LoserRank)), 
+
+#TODO: test this by equalising intervals (min-max scaling) and then Kolgomorv to test if distributions are the same?
+
+#### INTERACTIONS BY RANK ############
+
+
+RankTable = rbind(ratingA$rankMatch, ratingB$rankMatch, ratingC$rankMatch, 
+          ratingD$rankMatch, ratingE$rankMatch, ratingF$rankMatch)
+
+RankTable[, Pen := factor(c(rep('A', length(ratingA$rankMatch$WinnerRank)), 
+                            rep('B',length(ratingB$rankMatch$WinnerRank)), 
+                            rep('C',length(ratingC$rankMatch$WinnerRank)),
+                                rep('D', length(ratingD$rankMatch$LoserRank)), 
                                       rep('E', length(ratingE$rankMatch$LoserRank)), 
-                                      rep('F', length(ratingF$rankMatch$LoserRank)))))
-InteractionSmall[ ,Condition := "small"]
-InteractionLarge = data.table(LoserRank = c(ratingA$rankMatch$LoserRank, 
-                                     ratingB$rankMatch$LoserRank, 
-                                     ratingC$rankMatch$LoserRank),
-                       WinnerRank = c(ratingA$rankMatch$WinnerRank, 
-                                      ratingB$rankMatch$WinnerRank, 
-                                      ratingC$rankMatch$WinnerRank),
-                       Pen = factor(c(rep('A', length(ratingA$rankMatch$WinnerRank)), 
-                                      rep('B',length(ratingB$rankMatch$WinnerRank)), 
-                                      rep('C',length(ratingC$rankMatch$WinnerRank)))))
+                                      rep('F', length(ratingF$rankMatch$LoserRank))))]
+RankTable[Pen == "A" | Pen == "B"| Pen == "C" ,Condition := "large"]
+RankTable[Pen == "D" | Pen == "E"| Pen == "F" ,Condition := "small"]
 
-InteractionLarge[, Condition := "large"]
-allInteractions =rbind(InteractionSmall, InteractionLarge)
+RankTable[, RankDiff := abs(WinnerRank-LoserRank)]
+RankTable[, HighRankWins := WinnerRank < LoserRank]
 
-allInteractions[, RankDiff := abs(WinnerRank-LoserRank)]
-allInteractions[, HighRankWins := WinnerRank < LoserRank]
-
-
+RankTable[Code == "Avoidance"| Code == "Threat", AggressLvl := "non_physical"]
+RankTable[Code == "Peck"| Code == "Fight", AggressLvl := "physical"]
 
 # Plot for Dynamics of interactions by rank (small)
-ggplot(data = InteractionSmall, mapping = aes(x = WinnerRank, y =LoserRank)) + 
+ggplot(data = RankTable[Condition == "small",], mapping = aes(x = WinnerRank, y =LoserRank)) + 
   #geom_smooth(se= FALSE)+#method = lm, formula = y ~ splines::bs(x, 3), se = FALSE)+
   labs(y = 'Loser rank', x= 'Winner rank')+
   theme_classic(base_size = 18)+
@@ -183,11 +206,24 @@ ggplot(data = InteractionSmall, mapping = aes(x = WinnerRank, y =LoserRank)) +
   xlim(1,20)+
   ylim(1,20)
 
-
+ggplot(data = RankTable[Condition == "small",], mapping = aes(x = WinnerRank, y =LoserRank)) + 
+  #geom_smooth(se= FALSE)+#method = lm, formula = y ~ splines::bs(x, 3), se = FALSE)+
+  labs(y = 'Loser rank', x= 'Winner rank')+
+  theme_classic(base_size = 18)+
+  facet_grid(AggressLvl ~ Pen)+
+  #stat_density_2d(aes(fill = ..level..), geom="polygon")
+  #geom_density_2d(aes(colour = Pen), size = 2)
+  #geom_density_2d_filled(contour_var = "ndensity")
+  #geom_density_2d_filled(contour_var = "count") 
+  geom_density_2d_filled(alpha = 0.7, contour_var = "count")+
+  geom_abline(intercept = 0 , slope = 1, linetype = "dashed", colour = 'grey')+
+  geom_jitter(size = 1)+
+  xlim(1,20)+
+  ylim(1,20)
 
 
 # Plot for Dynamics of interactions by rank (large)
-ggplot(data = InteractionLarge, mapping = aes(x = WinnerRank, y =LoserRank)) + 
+ggplot(data = RankTable[Condition == "large",], mapping = aes(x = WinnerRank, y =LoserRank)) + 
   #geom_smooth(se= FALSE)+#method = lm, formula = y ~ splines::bs(x, 3), se = FALSE)+
   #geom_point(size = 2.5) + 
   labs(y = 'Loser rank', x= 'Winner rank')+
@@ -203,42 +239,105 @@ ggplot(data = InteractionLarge, mapping = aes(x = WinnerRank, y =LoserRank)) +
   xlim(1,120)+
   ylim(1,120)
 
-fwrite(rbind(InteractionSmall, InteractionLarge), file = "InteractionsRank.csv", sep = ";")
+# facet by aggression intensity
+ggplot(data = RankTable[Condition == "large",], mapping = aes(x = WinnerRank, y =LoserRank)) + 
+  #geom_smooth(se= FALSE)+#method = lm, formula = y ~ splines::bs(x, 3), se = FALSE)+
+  #geom_point(size = 2.5) + 
+  labs(y = 'Loser rank', x= 'Winner rank')+
+  theme_classic(base_size = 18)+
+  facet_grid(AggressLvl ~ Pen)+
+  #stat_density_2d(aes(fill = ..level..), geom="polygon")
+  #geom_density_2d(aes(colour = Pen), size = 2)
+  #geom_density_2d_filled(contour_var = "ndensity")
+  #geom_density_2d_filled(contour_var = "count") 
+  geom_density_2d_filled(alpha = 0.7, contour_var = "count")+
+  geom_abline(intercept = 0 , slope = 1, linetype = "dashed", colour = 'grey')+
+  geom_jitter(size = 0.6, colour = 'black')+
+  xlim(1,120)+
+  ylim(1,120)
 
 
-# model propability to win according to difference of rank
-Win_data <- allInteractions %>%
-  #code buzz cola choice as a binary variable
-  mutate(Winner_high = case_when(
-    choice == "buzz_cola" ~ 1,
-    choice == "slurm" ~ 0
-  )) %>%
-  #group by combinations and find the proportion of buzz cola choices
-  group_by(buzz_cola, slurm) %>%
-  summarise(fraction_choose_cola = mean(buzz_cola_choice))
+ggplot(data = RankTable[Condition == "small",], aes(x = AggressLvl, y = RankDiff))+
+  geom_boxplot(outlier.shape = NA)+
+  geom_jitter()+
+  facet_grid(.~Pen)
+ggplot(data = RankTable[Condition == "large",], aes(x = AggressLvl, y = RankDiff))+
+  geom_boxplot(outlier.shape = NA)+
+  geom_jitter()+
+  facet_grid(.~Pen)
 
-WinProb = allInteractions[, .(highRankWinProb = mean(HighRankWins), Condition = Condition), by = c("Pen", "RankDiff")]
 
-binomial_smooth <- function(...) {
-  geom_smooth(method = "glm", method.args = list(family = "binomial"), ...)
-}
+#TODO: how to check if dstributions are similar?
+#Aggression type by rank difference
+ggplot(data = RankTable[Condition == "small",], aes(x = RankDiff, color = AggressLvl))+
+  geom_density(size = 2)+
+  #facet_grid(.~Pen)+
+  theme_bw(base_size = 18)
+qqplot(RankTable[Condition == "small" & AggressLvl == "non_physical",RankDiff],
+       RankTable[Condition == "small" & AggressLvl == "physical",RankDiff])
+abline(a = 0, b = 1, lty = 3)
+ks.test(RankTable[Condition == "small" & AggressLvl == "non_physical",RankDiff],
+        RankTable[Condition == "small" & AggressLvl == "physical",RankDiff])
 
-#plot the logistic regression on the entire choice data
-  ggplot(data = WinProb[Condition == "small"], aes(x = RankDiff, y = highRankWinProb, colour = factor(Pen))) +
-  geom_point() +
-  binomial_smooth(se = FALSE) +
-  #add in some aesthetics
-  scale_colour_discrete(name = "Pen") +
-  labs(x = "RankDiff",
-       y = "Porbability that high ranking individual wins") +
-  theme_minimal()
+ggplot(data = RankTable[Condition == "large",], aes(x = RankDiff, color = AggressLvl))+
+  geom_density(size = 2)+
+  #facet_grid(.~Pen)+
+  theme_bw(base_size = 18)
+qqplot(RankTable[Condition == "large" & AggressLvl == "non_physical",RankDiff],
+       RankTable[Condition == "large" & AggressLvl == "physical",RankDiff])
+abline(a = 0, b = 1, lty = 3)
+ks.test(RankTable[Condition == "large" & AggressLvl == "non_physical",RankDiff],
+        RankTable[Condition == "large" & AggressLvl == "physical",RankDiff])
 
-WinProb[RankDiff == 2,]  
-  
-WinChance.model = glmer(HighRankWins ~ RankDiff + (1|Pen), data = allInteractions[Condition == "small",], family = binomial)
-resid.Win<- simulateResiduals(WinChance.model, 100)
-plot(resid.Win)
-summary(WinChance.model)
+# Aggression type by individual rank
+ggplot(data = RankTable[Condition == "large",], aes(x = WinnerRank, color = AggressLvl))+
+  geom_density(size = 2)+
+  #facet_grid(.~Pen)+
+  theme_bw(base_size = 18)
+qqplot(RankTable[Condition == "large" & AggressLvl == "non_physical",WinnerRank],
+       RankTable[Condition == "large" & AggressLvl == "physical",WinnerRank])
+abline(a = 0, b = 1, lty = 3)
+ks.test(RankTable[Condition == "large" & AggressLvl == "non_physical",WinnerRank],
+        RankTable[Condition == "large" & AggressLvl == "physical",WinnerRank])
+
+ggplot(data = RankTable[Condition == "large",], aes(x = LoserRank, color = AggressLvl))+
+  geom_density(size = 2)+
+  #facet_grid(.~Pen)+
+  theme_bw(base_size = 18)
+qqplot(RankTable[Condition == "large" & AggressLvl == "non_physical",LoserRank],
+       RankTable[Condition == "large" & AggressLvl == "physical",LoserRank])
+abline(a = 0, b = 1, lty = 3)
+ks.test(RankTable[Condition == "large" & AggressLvl == "non_physical",LoserRank],
+        RankTable[Condition == "large" & AggressLvl == "physical",LoserRank])
+
+
+ggplot(data = RankTable[Condition == "small",], aes(x = WinnerRank, color = AggressLvl))+
+  geom_density(size = 2)+
+  #facet_grid(.~Pen)+
+  theme_bw(base_size = 18)
+qqplot(RankTable[Condition == "small" & AggressLvl == "non_physical",WinnerRank],
+       RankTable[Condition == "small" & AggressLvl == "physical",WinnerRank])
+abline(a = 0, b = 1, lty = 3)
+ks.test(RankTable[Condition == "small" & AggressLvl == "non_physical",WinnerRank],
+        RankTable[Condition == "small" & AggressLvl == "physical",WinnerRank])
+
+ggplot(data = RankTable[Condition == "small",], aes(x = LoserRank, color = AggressLvl))+
+  geom_density(size = 2)+
+  #facet_grid(.~Pen)+
+  theme_bw(base_size = 18)
+qqplot(RankTable[Condition == "small" & AggressLvl == "non_physical",LoserRank],
+       RankTable[Condition == "small" & AggressLvl == "physical",LoserRank])
+abline(a = 0, b = 1, lty = 3)
+ks.test(RankTable[Condition == "small" & AggressLvl == "non_physical",LoserRank],
+        RankTable[Condition == "small" & AggressLvl == "physical",LoserRank])
+
+
+#fwrite(rbind(InteractionSmall, InteractionLarge), file = "InteractionsRank.csv", sep = ";")
+
+######## AGGRESSION BY CONDITION ##############
+
+
+
 
 ##### clustering ############
 
