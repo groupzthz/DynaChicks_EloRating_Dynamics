@@ -72,7 +72,6 @@ rm(dataMature,
 ################ Diagnostics ###############################################################
 
 # Dataset analytics:
-#TODO: reactivate heuristic calculation
 
 diagnA = dataset_diagnostics(PenA, Individ$ID[Individ$Pen == 'A'])
 diagnB = dataset_diagnostics(PenB, Individ$ID[Individ$Pen == 'B'])

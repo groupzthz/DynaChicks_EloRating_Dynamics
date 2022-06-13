@@ -30,22 +30,22 @@ dataset_diagnostics <- function(dataset, Individuals){
   # Triangle Transitivity (Shizuka & McDonald 2012)
   ttri = round(transitivity(as.matrix(data_matrix), runs = 1000),7)
   
-  # cat("Calculating Focus, Position and Strategy\n")
-  # 
-  # input = dom_make_data(as.matrix(data_matrix))
-  # 
-  # blur = dom_make_blur_data(as.matrix(data_matrix))
-  # 
-  # strategy = dom_categorize_strategy(input, blur, use_data_ci = TRUE)
-  # 
-  input = NULL
-  strategy = NULL
+  cat("Calculating Focus, Position and Strategy\n")
+   
+  input = dom_make_data(as.matrix(data_matrix))
+   
+  blur = dom_make_blur_data(as.matrix(data_matrix))
+   
+  strategy = dom_categorize_strategy(input, blur, use_data_ci = TRUE)
+   
+  input = input
+  strategy = strategy
   
   output = list(seen_notSeen, tot_interact, ratio_interact, prop_unknown, prop_known, 
-                ttri) #,input, strategy)
+                ttri,input, strategy)
   
   names(output) = c('seen_notSeen', 'tot_interact', 'ratio_interact', 'prop_unknown', 'prop_known', 
-                    'triang_trans')#,'focus_pos', 'strategy')
+                    'triang_trans','focus_pos', 'strategy')
   
   return(output)
 }
