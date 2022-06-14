@@ -155,7 +155,7 @@ ggplot(Interact[Condition == 'large',],aes(x = rank, y = ratio, colour = Pen)) +
 ggplot(data = Interact[Condition == 'small',], mapping = aes(x = rank, y =sum, colour = Pen)) + 
   geom_smooth(se= FALSE)+#method = lm, formula = y ~ splines::bs(x, 3), se = FALSE)+
   geom_point(size = 2.5) + 
-  labs(y = 'Number of Interactions')+
+  labs(x = 'Rank', y = 'Number of Interactions')+
   theme_classic(base_size = 18)
 
 
@@ -163,7 +163,7 @@ ggplot(data = Interact[Condition == 'small',], mapping = aes(x = rank, y =sum, c
 ggplot(data = Interact[Condition == 'large',], mapping = aes(x = rank, y = sum, colour = Pen)) + 
   geom_smooth(se= FALSE)+#method = lm, formula = y ~ splines::bs(x, 3), se = FALSE)+
   geom_point(size = 2.5) + 
-  labs(y = 'Number of Interactions')+
+  labs(x = 'Rank', y = 'Number of Interactions')+
   theme_classic(base_size = 18)
 
 
@@ -189,6 +189,7 @@ RankTable[, HighRankWins := WinnerRank < LoserRank]
 
 RankTable[Code == "Avoidance"| Code == "Threat", AggressLvl := "non_physical"]
 RankTable[Code == "Peck"| Code == "Fight", AggressLvl := "physical"]
+
 
 # Plot for Dynamics of interactions by rank (small)
 ggplot(data = RankTable[Condition == "small",], mapping = aes(x = WinnerRank, y =LoserRank)) + 
@@ -290,6 +291,7 @@ ks.test(RankTable[Condition == "large" & AggressLvl == "non_physical",RankDiff],
         RankTable[Condition == "large" & AggressLvl == "physical",RankDiff])
 
 # Aggression type by individual rank
+# by Winner rank
 ggplot(data = RankTable[Condition == "large",], aes(x = WinnerRank, color = AggressLvl))+
   geom_density(size = 2)+
   #facet_grid(.~Pen)+
@@ -299,6 +301,12 @@ qqplot(RankTable[Condition == "large" & AggressLvl == "non_physical",WinnerRank]
 abline(a = 0, b = 1, lty = 3)
 ks.test(RankTable[Condition == "large" & AggressLvl == "non_physical",WinnerRank],
         RankTable[Condition == "large" & AggressLvl == "physical",WinnerRank])
+
+testData = 
+
+
+test = glmer()
+
 
 ggplot(data = RankTable[Condition == "large",], aes(x = LoserRank, color = AggressLvl))+
   geom_density(size = 2)+
@@ -335,7 +343,21 @@ ks.test(RankTable[Condition == "small" & AggressLvl == "non_physical",LoserRank]
 #fwrite(rbind(InteractionSmall, InteractionLarge), file = "InteractionsRank.csv", sep = ";")
 
 ######## AGGRESSION BY CONDITION ##############
+ggplot(data = RankTable[Condition == "small",], aes(x = RankDiff, color = AggressLvl))+
+  geom_density(size = 2)+
+  facet_grid(.~Situation)+
+  theme_bw(base_size = 18)
 
+ggplot(data = RankTable[Condition == "large",], aes(x = RankDiff, color = AggressLvl))+
+  geom_density(size = 2)+
+  facet_grid(.~Situation)+
+  theme_bw(base_size = 18)
+
+
+ggplot(data = RankTable[Condition == "small",], aes(x = LoserRank, color = AggressLvl))+
+  geom_density(size = 2)+
+  facet_grid(Pen~Situation)+
+  theme_bw(base_size = 18)
 
 
 
