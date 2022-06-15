@@ -127,7 +127,7 @@ Interact[, Pen := factor(c(rep('A', length(ratingA$Individuals$rank)),
 
 Interact[, Condition := factor(c(rep("large", length(Pen)-60), 
                                  rep("small", 60)))]
-Interact = na.omit(Interact)
+
 
 # ratio of Inetraction per Individual
 Interact[, ratio := sum/(sum(sum)*0.5), by = Pen]
@@ -135,9 +135,10 @@ Interact[, ratio := sum/(sum(sum)*0.5), by = Pen]
 #scaled elos
 Interact[, scaleElo := scale(elos), by = Pen]
 
-Interact[order(rank), cumRatio := cumsum(ratio), by = Pen]
-Interact[order(-rank), cumRatioLow := cumsum(ratio), by = Pen]
-Interact[order(-rank), which(cumRatioLow > 0.5)[1], by = Pen]
+fwrite(Interact, "IndividualData.csv", sep = ";")
+
+Interact = na.omit(Interact)
+
 
 #plot ratio of interactions by individual
 ggplot(Interact[Condition == 'small',],aes(x = rank, y = ratio, colour = Pen)) + 
