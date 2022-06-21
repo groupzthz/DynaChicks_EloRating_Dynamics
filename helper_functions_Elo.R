@@ -225,14 +225,14 @@ elo_analysis = function(dataset, Individuals, all = FALSE){
     Individuals$elos = rating_rand[sort(names(rating_rand))]
     Individuals$rank = ranking_rand[sort(names(ranking_rand))]
     Individuals[, sum := Wins+Losses]
+    Individuals[,scaleElos := scale(elos)] 
     
     rankMatch = data.table(Winner = winners, Loser = losers, Code = dataset$Code, Situation = dataset$Condition)
     rankMatch[, WinnerRank := Individuals$rank[match(winners, Individuals$ID)]]
     rankMatch[, LoserRank := Individuals$rank[match(losers, Individuals$ID)]]
-    rankMatch[, WinnerElo := Individuals$elos[match(winners, Individuals$ID)]]
-    rankMatch[, LoserElo := Individuals$elos[match(losers, Individuals$ID)]]
-    rankMatch[, WinnerEloS := scale(WinnerElo)]
-    rankMatch[, LoserEloS := scale(LoserElo)]
+    rankMatch[, WinnerElo := Individuals$scaleElos[match(winners, Individuals$ID)]]
+    rankMatch[, LoserElo := Individuals$scaleElos[match(losers, Individuals$ID)]]
+
   }else {
     rankMatch = NULL
   }
