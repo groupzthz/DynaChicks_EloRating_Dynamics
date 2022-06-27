@@ -170,6 +170,15 @@ plotResiduals(resid.df2, form = Interact$scaleElos)
 summary(sum.model.red)
 parameters(sum.model.red)
 
+#TODO: OR: glmer.nb
+sum.model2 = glmer.nb(sum ~ poly(scaleElos,2)*Condition + (1|Pen), Interact)
+resid.df2<- simulateResiduals(sum.model2, 1000)
+plot(resid.df2)
+plotResiduals(resid.df2, form = Interact$Condition)
+plotResiduals(resid.df2, form = Interact$scaleElos)
+
+drop1(sum.model, test = "Chisq") # significantly better fit 
+
 
 # Plot for Dynamics of interactions by rank (small)
 ggplot(data = Interact[Condition == 'small',], mapping = aes(x = rank, y =sum, colour = Pen)) + 
@@ -187,7 +196,27 @@ ggplot(data = Interact[Condition == 'large',], mapping = aes(x = rank, y = sum, 
   theme_classic(base_size = 18)
 
 
-#TODO: test this by equalising intervals (min-max scaling) and then Kolgomorv to test if distributions are the same?
+#Who accounts for how much percentage of Interactions
+InteractSum = Interact[order(Pen, rank),]
+InteractSum[, CumSum := cumsum(sum)/(sum(sum)*0.5), by = Pen]
+InteractSum[, which(CumSum>0.75)[1]/.N, by = Pen]
+
+# Plot for Dynamics of interactions by rank (small)
+ggplot(data = InteractSum[Condition == 'small',], mapping = aes(x = rank, y =CumSum, colour = Pen)) + 
+  geom_smooth(se= FALSE)+#method = lm, formula = y ~ splines::bs(x, 3), se = FALSE)+
+  geom_point(size = 2.5) + 
+  labs(x = 'Rank', y = 'Number of Interactions')+
+  theme_classic(base_size = 18)
+
+
+# Plot for Dynamics of interactions by rank (large)
+ggplot(data = InteractSum[Condition == 'large',], mapping = aes(x = rank, y = CumSum, colour = Pen)) + 
+  geom_smooth(se= FALSE)+#method = lm, formula = y ~ splines::bs(x, 3), se = FALSE)+
+  geom_point(size = 2.5) + 
+  labs(x = 'Rank', y = 'Number of Interactions')+
+  theme_classic(base_size = 18)
+
+
 
 #### INTERACTIONS BY RANK ############
 
@@ -211,22 +240,25 @@ RankTable[Code == "Avoidance"| Code == "Threat", AggressLvl := "non_physical"]
 RankTable[Code == "Peck"| Code == "Fight", AggressLvl := "physical"]
 
 
+
 # Plot for Dynamics of interactions by rank (small)
 ggplot(data = RankTable[Condition == "small",], mapping = aes(x = WinnerRank, y =LoserRank)) + 
   #geom_smooth(se= FALSE)+#method = lm, formula = y ~ splines::bs(x, 3), se = FALSE)+
   labs(y = 'Loser rank', x= 'Winner rank')+
   theme_classic(base_size = 18)+
+  theme(legend.position = "none")+
   facet_grid(. ~ Pen)+
   #stat_density_2d(aes(fill = ..level..), geom="polygon")
   #geom_density_2d(aes(colour = Pen), size = 2)
   #geom_density_2d_filled(contour_var = "ndensity")
   #geom_density_2d_filled(contour_var = "count") 
-  geom_density_2d_filled(alpha = 0.7, contour_var = "count")+
+  geom_density_2d_filled(alpha = 0.7, contour_var = "ndensity")+
   geom_abline(intercept = 0 , slope = 1, linetype = "dashed", colour = 'grey')+
-  geom_jitter(size = 1)+
-  xlim(1,20)+
-  ylim(1,20)
+  geom_jitter(size = 1.2, width = 0.4)+
+  xlim(0.5,20.5)+
+  ylim(0.5,20.5)
 
+#facet by intensity
 ggplot(data = RankTable[Condition == "small",], mapping = aes(x = WinnerRank, y =LoserRank)) + 
   #geom_smooth(se= FALSE)+#method = lm, formula = y ~ splines::bs(x, 3), se = FALSE)+
   labs(y = 'Loser rank', x= 'Winner rank')+
@@ -238,7 +270,7 @@ ggplot(data = RankTable[Condition == "small",], mapping = aes(x = WinnerRank, y 
   #geom_density_2d_filled(contour_var = "count") 
   geom_density_2d_filled(alpha = 0.7, contour_var = "count")+
   geom_abline(intercept = 0 , slope = 1, linetype = "dashed", colour = 'grey')+
-  geom_jitter(size = 1)+
+  geom_jitter(size = 1, width = 0.4)+
   xlim(1,20)+
   ylim(1,20)
 
@@ -249,16 +281,17 @@ ggplot(data = RankTable[Condition == "large",], mapping = aes(x = WinnerRank, y 
   #geom_point(size = 2.5) + 
   labs(y = 'Loser rank', x= 'Winner rank')+
   theme_classic(base_size = 18)+
+  theme(legend.position = "none")+
   facet_grid(. ~ Pen)+
   #stat_density_2d(aes(fill = ..level..), geom="polygon")
   #geom_density_2d(aes(colour = Pen), size = 2)
   #geom_density_2d_filled(contour_var = "ndensity")
   #geom_density_2d_filled(contour_var = "count") 
-  geom_density_2d_filled(alpha = 0.7, contour_var = "count")+
+  geom_density_2d_filled(alpha = 0.7, contour_var = "ndensity")+
   geom_abline(intercept = 0 , slope = 1, linetype = "dashed", colour = 'grey')+
-  geom_jitter(size = 0.6, colour = 'black')+
-  xlim(1,120)+
-  ylim(1,120)
+  geom_jitter(size = 0.6, width = 0.4)+
+  xlim(0.5,120)+
+  ylim(0.5,120)
 
 # facet by aggression intensity
 ggplot(data = RankTable[Condition == "large",], mapping = aes(x = WinnerRank, y =LoserRank)) + 
@@ -276,6 +309,18 @@ ggplot(data = RankTable[Condition == "large",], mapping = aes(x = WinnerRank, y 
   geom_jitter(size = 0.6, colour = 'black')+
   xlim(1,120)+
   ylim(1,120)
+
+
+# Example plot for Dynamics of interactions by rank 
+ggplot(data = RankTable[Pen == "E",], mapping = aes(x = WinnerRank, y =LoserRank)) + 
+  #geom_smooth(se= FALSE)+#method = lm, formula = y ~ splines::bs(x, 3), se = FALSE)+
+  labs(y = 'Loser rank', x= 'Winner rank')+
+  theme_classic(base_size = 18)+
+  geom_density_2d_filled(alpha = 0.7, contour_var = "ndensity")+
+  geom_abline(intercept = 0 , slope = 1, linetype = "dashed", colour = 'grey')+
+  geom_jitter(size = 1.5, width = 0.4)+
+  xlim(0.5,20.5)+
+  ylim(0.5,20.5)
 
 
 ggplot(data = RankTable[Condition == "small",], aes(x = AggressLvl, y = RankDiff))+
@@ -484,18 +529,82 @@ ggplot(data = RankTable[Condition == "small",], aes(x = LoserRank, color = Aggre
   theme_bw(base_size = 18)
 
 
-##### Individual data ###########
+##### Individual contacts data ###########
 
 RankTable[, IndividWin := paste0(Pen, Winner)]
 RankTable[, IndividLos := paste0(Pen, Loser)]
+Interact[, Individual := paste0(Pen, ID)]
 
-test = t(apply(RankTable[, 16:17],1, function(x){sort(x)}))
+UniqueContacts1 = RankTable[,.(InteractUniq = unique(IndividLos) ), by = (IndividWin)]
+UniqueContacts1 = RankTable[,.(InteractUniq = unique(IndividWin) ), by = (IndividLos)]
+colnames(UniqueContacts1)[1] <- "Individual" 
+colnames(UniqueContacts2)[1] <- "Individual"
 
-RankTable[, alphabOrder1 := test[,1]]
-RankTable[, alphabOrder2 := test[,2]]
+UniqueContacts = rbind(UniqueContacts1, UniqueContacts2)
+UniqueContacts = UniqueContacts[order(Individual, InteractUniq), ]
+UniqueContacts[, dupl := rleid(Individual, InteractUniq)]
+UniqueContacts[, duplBool := duplicated(dupl)]
+UniqueContacts = UniqueContacts[duplBool == F,]
 
-UniqueContacts = RankTable[,.(InteractUniq = length(unique(alphabOrder2))) , by = (alphabOrder1)]
-#how to make sure all animals are taken -> make interaction matrix per pen
+UniqueContactsN = UniqueContacts[, .(Contacts = .N), by = "Individual"] 
+
+Interact = Interact[UniqueContactsN, on = .(Individual)]
+
+Interact[, .(max = max(Contacts), min = min(Contacts), median = median(Contacts)), by = Pen]
+
+# Plot for Dynamics of interactions by rank (small)
+ggplot(data = Interact[Condition == 'small',], mapping = aes(x = rank, y =Contacts, colour = Pen)) + 
+  geom_smooth(se= FALSE)+#method = lm, formula = y ~ splines::bs(x, 3), se = FALSE)+
+  geom_point(size = 2.5) + 
+  labs(x = 'Rank', y = 'Number of unique Contacts')+
+  theme_classic(base_size = 18)
+
+
+# Plot for Dynamics of interactions by rank (large)
+ggplot(data = Interact[Condition == 'large',], mapping = aes(x = rank, y = Contacts, colour = Pen)) + 
+  geom_smooth(se= FALSE)+#method = lm, formula = y ~ splines::bs(x, 3), se = FALSE)+
+  geom_point(size = 2.5) + 
+  labs(x = 'Rank', y = 'Number of unique Contacts')+
+  theme_classic(base_size = 18)
+
+Contacts.model = glmer(Contacts ~ poly(scaleElos,2)*Condition + (1|Pen) + (1|rowNum), Interact, family = 'poisson')
+resid.df2<- simulateResiduals(Contacts.model, 1000)
+plot(resid.df2)
+plotResiduals(resid.df2, form = Interact$Condition)
+plotResiduals(resid.df2, form = Interact$scaleElos)
+#heterogenity and uniformity issues
+
+Contacts.model.null = glmer(Contacts ~ 1 + (1|Pen) + (1|rowNum), Interact, family = 'poisson')
+anova(Contacts.model, Contacts.model.null, test = "Chisq")
+
+#check negative binomial fit
+Contacts.model2 = glmer.nb(Contacts ~ poly(scaleElos,2)*Condition + (1|Pen), Interact)
+resid.df2<- simulateResiduals(Contacts.model2, 1000) # heterogenity
+plot(resid.df2)
+plotResiduals(resid.df2, form = Interact$Condition) # heterogenity
+plotResiduals(resid.df2, form = Interact$scaleElos)
+
+library("glmmTMB")
+Contacts.nbm0 = glmmTMB(Contacts~poly(scaleElos,2)*Condition + (1|Pen),disp=~Condition, Interact, family=nbinom2,
+                        control = glmmTMBControl(optimizer = optim, 
+                                                 optArgs = list(method="BFGS",iter.max=1e50,eval.max=1e50)))
+resid.df2<- simulateResiduals(Contacts.nbm0, 1000) # heterogenity
+plot(resid.df2)
+plotResiduals(resid.df2, form = Interact$Condition) # heterogenity
+plotResiduals(resid.df2, form = Interact$scaleElos)
+
+drop1(Contacts.nbm0, test = "Chisq") # nope no drop
+summary(Contacts.nbm0)
+# important though????? -> obvious that large groups can have more contacts, median more interesting
+
+#Do large group high ranking inetract with other high ranking?
+
+
+
+
+
+
+
 
 ##### clustering ############
 
@@ -537,7 +646,7 @@ modelInteract = glmer.nb(sum ~ cluster*Condition + (1|Pen), Interact_clean)
 
 #IDEA: do on exact scaled ELo-rating instead of rank or cluster
 # vergleich cluster und Elo-rating (verteilung, skalieren)
-modelInteract2 = glmer.nb(sum ~ poly(scaleElos,3)*Condition + (1|Pen), Interact_scale)
+modelInteract2 = glmer.nb(sum ~ poly(scaleElos,2)*Condition + (1|Pen), Interact)
 # how to interpret this????
 resid.df1<- simulateResiduals(modelInteract, 500)
 resid.df2<- simulateResiduals(modelInteract2, 500)
