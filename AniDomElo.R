@@ -21,6 +21,7 @@ library(irr) # ICC calculations
 library(parameters) # model parameters
 library(emmeans) #model means
 library(effects) #model effects visualisation
+library(RColorBrewer) # color for plotting
 source('helper_functions_Elo.R')
 set.seed(42)
 
@@ -179,22 +180,37 @@ plotResiduals(resid.df2, form = Interact$scaleElos)
 
 drop1(sum.model, test = "Chisq") # significantly better fit 
 
+Interact[, PredictSum := exp(predict(sum.model2))]
 
 # Plot for Dynamics of interactions by rank (small)
-ggplot(data = Interact[Condition == 'small',], mapping = aes(x = rank, y =sum, colour = Pen)) + 
-  geom_smooth(se= FALSE)+#method = lm, formula = y ~ splines::bs(x, 3), se = FALSE)+
+sum1 = ggplot(data = Interact[Condition == 'small',], mapping = aes(x = rank, y =sum, colour = Pen)) + 
+  geom_smooth(se= FALSE)+#method = glmer.nb, formula = y ~ splines::bs(x, 3), se = FALSE)+
   geom_point(size = 2.5) + 
   labs(x = 'Rank', y = 'Number of Interactions')+
   theme_classic(base_size = 18)
 
 
 # Plot for Dynamics of interactions by rank (large)
-ggplot(data = Interact[Condition == 'large',], mapping = aes(x = rank, y = sum, colour = Pen)) + 
+sum1 = ggplot(data = Interact[Condition == 'large',], mapping = aes(x = rank, y = sum, colour = Pen)) + 
   geom_smooth(se= FALSE)+#method = lm, formula = y ~ splines::bs(x, 3), se = FALSE)+
   geom_point(size = 2.5) + 
   labs(x = 'Rank', y = 'Number of Interactions')+
   theme_classic(base_size = 18)
 
+
+
+largeCol = brewer.pal(n = 8, name = "Blues")[c(4,6,8)]
+smallCol = brewer.pal(n = 8, name = "OrRd")[c(4,6,8)]
+
+#effect plot of Elo and number of interactions split by group
+ ggplot(data = Interact, mapping = aes(x = scaleElos, y =sum, colour = Pen)) + 
+       geom_smooth(aes(x = scaleElos, y = PredictSum), se= FALSE)+#method = glmer.nb, formula = y ~ splines::bs(x, 3), se = FALSE)+
+       geom_point(size = 2.5) + 
+       labs(x = 'scaled Elo rating', y = 'Number of Interactions')+
+       facet_grid(.~ Condition) + 
+      theme_bw(base_size = 18)+
+   scale_color_manual(values=c(largeCol, smallCol))+
+     theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank())
 
 #Who accounts for how much percentage of Interactions
 InteractSum = Interact[order(Pen, rank),]
@@ -599,9 +615,78 @@ summary(Contacts.nbm0)
 
 #Do large group high ranking inetract with other high ranking?
 
+###### Steepness plots ##############
+
+ratingA$hierarchy_shape_rand$plot
+
+library(ggpubr)
+p1 = ratingA$hierarchy_shape_rand$plot+
+  scale_y_continuous(limits=c(0.25,1),oob = rescale_none)+
+  scale_x_continuous(breaks = c(1,seq(0,120, 10)[2:12], 119),oob = rescale_none)+
+  theme(
+    axis.title.x = element_text(),
+    axis.title.y = element_text(angle = 90)
+  )+
+  labs(x = "Difference in rank", y = "Probability that high rank wins")
+p2 = ratingE$hierarchy_shape_rand$plot+
+  scale_y_continuous(limits=c(0.25,1),oob = rescale_none)+
+  theme(
+    axis.title.x = element_text(),
+    axis.title.y = element_text(angle = 90)
+  )+
+  labs(x = "Difference in rank", y = "Probability that high rank wins")
 
 
+##### Hierrachy plots #######
 
+mean.eloM = rowMeans(ratingE$randElo)
+identitiesM = rownames(ratingE$randElo)
+identitiesM <- identitiesM[order(mean.eloM)]
+CIsM <- apply(ratingE$randElo,1,quantile,c(0.025,0.975),na.rm=TRUE)
+CIsM <- CIsM[,order(mean.eloM)]
+mean.eloM <- mean.eloM[order(mean.eloM)]
+
+plotTable = data.table(number = 1:20,  
+                        ranks = mean.eloM,
+                        IDs = identitiesM
+)
+
+ggplot(plotTable, aes(x = number, y= ranks))+
+  geom_errorbar(aes(x= number, ymin=CIsM[1,], ymax=CIsM[2,]), width=.1)+
+  geom_point(shape = 21, size = 4.7, colour = "white", fill = "white", stroke = 1)+
+  #scale_y_continuous(limits = c(-450, 650))+
+  geom_text(
+    label=plotTable$IDs,
+    size = 4)+
+  labs(x = "Individuals", y="Elo-rating")+
+  theme_classic(base_size = 18)+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())  
+
+
+mean.eloM = rowMeans(ratingB$randElo)
+identitiesM = rownames(ratingB$randElo)
+identitiesM <- identitiesM[order(mean.eloM)]
+CIsM <- apply(ratingB$randElo,1,quantile,c(0.025,0.975),na.rm=TRUE)
+CIsM <- CIsM[,order(mean.eloM)]
+mean.eloM <- mean.eloM[order(mean.eloM)]
+
+plotTable = data.table(number = 1:length(mean.eloM),  
+                       ranks = mean.eloM,
+                       IDs = identitiesM
+)
+
+ggplot(plotTable, aes(x = number, y= ranks))+
+  geom_errorbar(aes(x= number, ymin=CIsM[1,], ymax=CIsM[2,]), width=.1)+
+  geom_point( size = 2)+
+  #scale_y_continuous(limits = c(-450, 650))+
+  #geom_text(
+  #  label=plotTable$IDs,
+  #  size = 4)+
+  labs(x = "Individuals", y="Elo-rating")+
+  theme_classic(base_size = 18)+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank()) 
 
 
 
