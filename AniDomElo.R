@@ -22,6 +22,7 @@ library(parameters) # model parameters
 library(emmeans) #model means
 library(effects) #model effects visualisation
 library(RColorBrewer) # color for plotting
+library(EloSteepness) # for steepness measure
 source('helper_functions_Elo.R')
 set.seed(42)
 
@@ -102,6 +103,35 @@ printCalculations(ratingD)
 printCalculations(ratingE)
 printCalculations(ratingF)
 
+##################### Bayesian Steepness ##########################################################
+#Steepness
+steepA = elo_steepness_from_sequence(winner = PenA$Winner,
+                                      loser = PenA$Loser,
+                                      refresh = 0,
+                                      cores = 2)
+steepB = elo_steepness_from_sequence(winner = PenB$Winner,
+                                     loser = PenB$Loser,
+                                     refresh = 0,
+                                     cores = 2)
+
+steepC = elo_steepness_from_sequence(winner = PenC$Winner,
+                                     loser = PenC$Loser,
+                                     refresh = 0,
+                                     cores = 2)
+steepD = elo_steepness_from_sequence(winner = PenD$Winner,
+                                     loser = PenD$Loser,
+                                     refresh = 0,
+                                     cores = 2)
+steepE = elo_steepness_from_sequence(winner = PenE$Winner,
+                                     loser = PenE$Loser,
+                                     refresh = 0,
+                                     cores = 2)
+steepF = elo_steepness_from_sequence(winner = PenF$Winner,
+                                     loser = PenF$Loser,
+                                     refresh = 0,
+                                     cores = 2)
+
+
 #######################################################################################
 
 ####### DATASET DESCRIPTIONS ################
@@ -120,8 +150,9 @@ PenD[, .N, by = Code]
 PenE[, .N, by = Code]
 PenF[, .N, by = Code]
 
-###### SUM OF INTERACTIONS #################
+###### DATA Tables to work with #################
 
+# Overview of data of all individuals 
 Interact = rbind(ratingA$Individuals, ratingB$Individuals, ratingC$Individuals, ratingD$Individuals,
                  ratingE$Individuals, ratingF$Individuals)
 Interact[, Pen := factor(c(rep('A', length(ratingA$Individuals$rank)), 
@@ -129,85 +160,101 @@ Interact[, Pen := factor(c(rep('A', length(ratingA$Individuals$rank)),
                            rep('C',length(ratingC$Individuals$rank)),
                            rep('D', 20), rep('E',20), rep('F',20)))]
 
-Interact[, Condition := factor(c(rep("large", length(Pen)-60), 
+Interact[, Group_Size := factor(c(rep("large", length(Pen)-60), 
                                  rep("small", 60)))]
 
 
-# ratio of Inetraction per Individual
+# ratio of Interaction per Individual
 Interact[, ratio := sum/(sum(sum)*0.5), by = Pen]
+Interact[, ratioIntens := physAggr/(physAggr+nonphysAggr)]
+
 
 #fwrite(Interact, "IndividualData.csv", sep = ";")
 
 Interact = na.omit(Interact)
 
-
-#plot ratio of interactions by individual
-ggplot(Interact[Condition == 'small',],aes(x = rank, y = ratio, colour = Pen)) + 
-  geom_point()+
-  geom_smooth(se = F)
-ggplot(Interact[Condition == 'large',],aes(x = rank, y = ratio, colour = Pen)) + 
-  geom_point()+
-  geom_smooth(se = F)
-
 Interact[, rowNum := 1:.N]
 
-sum.model = glmer(sum ~ poly(scaleElos,2)*Condition + (1|Pen) + (1|rowNum), Interact, family = 'poisson')
+####
+
+#All single Interactions with updated ranks and elos
+RankTable = rbind(ratingA$rankMatch, ratingB$rankMatch, ratingC$rankMatch, 
+                  ratingD$rankMatch, ratingE$rankMatch, ratingF$rankMatch)
+
+RankTable[, Pen := factor(c(rep('A', length(ratingA$rankMatch$WinnerRank)), 
+                            rep('B',length(ratingB$rankMatch$WinnerRank)), 
+                            rep('C',length(ratingC$rankMatch$WinnerRank)),
+                            rep('D', length(ratingD$rankMatch$LoserRank)), 
+                            rep('E', length(ratingE$rankMatch$LoserRank)), 
+                            rep('F', length(ratingF$rankMatch$LoserRank))))]
+RankTable[Pen == "A" | Pen == "B"| Pen == "C" ,Group_Size := "large"]
+RankTable[Pen == "D" | Pen == "E"| Pen == "F" ,Group_Size := "small"]
+
+RankTable[, RankDiff := abs(WinnerRank-LoserRank)]
+RankTable[, HighRankWins := WinnerRank < LoserRank]
+RankTable[, EloDiff := WinnerElo - LoserElo]
+RankTable[, rowNum := 1:.N]
+RankTable[, Situation := as.factor(Situation)]
+RankTable[, Group_Size := as.factor(Group_Size)]
+
+RankTable[Code == "Avoidance"| Code == "Threat", AggressLvl := "non_physical"]
+RankTable[Code == "Peck"| Code == "Fight", AggressLvl := "physical"]
+RankTable[, AggressBool := ifelse(AggressLvl == "non_physical", 0, 1)]
+
+
+############Sum of Interactions #####################################
+
+#rough overview plot of ratio of interactions by individual
+ggplot(Interact[Group_Size == 'small',],aes(x = rank, y = ratio, colour = Pen)) + 
+  geom_point()+
+  geom_smooth(se = F)
+ggplot(Interact[Group_Size == 'large',],aes(x = rank, y = ratio, colour = Pen)) + 
+  geom_point()+
+  geom_smooth(se = F)
+
+
+#model for the number of interactions by Elo
+sum.model = glmer(sum ~ poly(scaleElos,2)*Group_Size + (1|Pen), Interact, family = 'poisson')
 resid.df2<- simulateResiduals(sum.model, 1000)
-plot(resid.df2)
+plot(resid.df2) # overdispersion not good fit
+plotResiduals(resid.df2, form = Interact$Condition)
+plotResiduals(resid.df2, form = Interact$scaleElos)
+#try negative binomial fit to compensate overdispersal
+sum.model = glmer.nb(sum ~ poly(scaleElos,2)*Group_Size + (1|Pen), Interact)
+resid.df2<- simulateResiduals(sum.model, 1000)
+plot(resid.df2) #looks great
 plotResiduals(resid.df2, form = Interact$Condition)
 plotResiduals(resid.df2, form = Interact$scaleElos)
 
-sum.model.null = glmer(sum ~ 1 + (1|Pen) + (1|rowNum), Interact, family = 'poisson')
+sum.model.null = glmer.nb(sum ~ 1 + (1|Pen), Interact)#throws weird error 
 anova(sum.model, sum.model.null, test = "Chisq")
 
 #take out 2-way
 drop1(sum.model, test = "Chisq")
-sum.model.red = glmer(sum ~ poly(scaleElos,2)+ Condition + (1|Pen) + (1|rowNum), Interact, family = 'poisson')
+sum.model.red = glmer.nb(sum ~ poly(scaleElos,2)+ Group_Size + (1|Pen), Interact)
 resid.df2<- simulateResiduals(sum.model.red, 1000)
 plot(resid.df2)
 plotResiduals(resid.df2, form = Interact$Condition)
 plotResiduals(resid.df2, form = Interact$scaleElos)
 
 summary(sum.model.red)
-parameters(sum.model.red)
+parameters(sum.model.red, exponentiate = T)
 
-#TODO: OR: glmer.nb
-sum.model2 = glmer.nb(sum ~ poly(scaleElos,2)*Condition + (1|Pen), Interact)
-resid.df2<- simulateResiduals(sum.model2, 1000)
-plot(resid.df2)
-plotResiduals(resid.df2, form = Interact$Condition)
-plotResiduals(resid.df2, form = Interact$scaleElos)
-
-drop1(sum.model, test = "Chisq") # significantly better fit 
-
-Interact[, PredictSum := exp(predict(sum.model2))]
-
-# Plot for Dynamics of interactions by rank (small)
-sum1 = ggplot(data = Interact[Condition == 'small',], mapping = aes(x = rank, y =sum, colour = Pen)) + 
-  geom_smooth(se= FALSE)+#method = glmer.nb, formula = y ~ splines::bs(x, 3), se = FALSE)+
-  geom_point(size = 2.5) + 
-  labs(x = 'Rank', y = 'Number of Interactions')+
-  theme_classic(base_size = 18)
-
-
-# Plot for Dynamics of interactions by rank (large)
-sum1 = ggplot(data = Interact[Condition == 'large',], mapping = aes(x = rank, y = sum, colour = Pen)) + 
-  geom_smooth(se= FALSE)+#method = lm, formula = y ~ splines::bs(x, 3), se = FALSE)+
-  geom_point(size = 2.5) + 
-  labs(x = 'Rank', y = 'Number of Interactions')+
-  theme_classic(base_size = 18)
-
+Interact[, PredictSum := (predict(sum.model.red, type = "response"))]
+#TODO: how to get CI for plot?? se.fit in predicted doesn't work for glmer
+#Interact[, LCISum := exp(predict(sum.model.red)- 1.96 * se.fit)]
+#Interact[, UCISum := exp(predict(sum.model.red))]
 
 
 largeCol = brewer.pal(n = 8, name = "Blues")[c(4,6,8)]
 smallCol = brewer.pal(n = 8, name = "OrRd")[c(4,6,8)]
 
 #effect plot of Elo and number of interactions split by group
- ggplot(data = Interact, mapping = aes(x = scaleElos, y =sum, colour = Pen)) + 
+ggplot(data = Interact, mapping = aes(x = scaleElos, y =sum, colour = Pen)) + 
        geom_smooth(aes(x = scaleElos, y = PredictSum), se= FALSE)+#method = glmer.nb, formula = y ~ splines::bs(x, 3), se = FALSE)+
        geom_point(size = 2.5) + 
        labs(x = 'scaled Elo rating', y = 'Number of Interactions')+
-       facet_grid(.~ Condition) + 
+       facet_grid(.~ Group_Size) + 
       theme_bw(base_size = 18)+
    scale_color_manual(values=c(largeCol, smallCol))+
      theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank())
@@ -217,82 +264,27 @@ InteractSum = Interact[order(Pen, rank),]
 InteractSum[, CumSum := cumsum(sum)/(sum(sum)*0.5), by = Pen]
 InteractSum[, which(CumSum>0.75)[1]/.N, by = Pen]
 
-# Plot for Dynamics of interactions by rank (small)
-ggplot(data = InteractSum[Condition == 'small',], mapping = aes(x = rank, y =CumSum, colour = Pen)) + 
-  geom_smooth(se= FALSE)+#method = lm, formula = y ~ splines::bs(x, 3), se = FALSE)+
-  geom_point(size = 2.5) + 
-  labs(x = 'Rank', y = 'Number of Interactions')+
-  theme_classic(base_size = 18)
 
-
-# Plot for Dynamics of interactions by rank (large)
-ggplot(data = InteractSum[Condition == 'large',], mapping = aes(x = rank, y = CumSum, colour = Pen)) + 
-  geom_smooth(se= FALSE)+#method = lm, formula = y ~ splines::bs(x, 3), se = FALSE)+
-  geom_point(size = 2.5) + 
-  labs(x = 'Rank', y = 'Number of Interactions')+
-  theme_classic(base_size = 18)
-
-
-
-#### INTERACTIONS BY RANK ############
-
-
-RankTable = rbind(ratingA$rankMatch, ratingB$rankMatch, ratingC$rankMatch, 
-          ratingD$rankMatch, ratingE$rankMatch, ratingF$rankMatch)
-
-RankTable[, Pen := factor(c(rep('A', length(ratingA$rankMatch$WinnerRank)), 
-                            rep('B',length(ratingB$rankMatch$WinnerRank)), 
-                            rep('C',length(ratingC$rankMatch$WinnerRank)),
-                                rep('D', length(ratingD$rankMatch$LoserRank)), 
-                                      rep('E', length(ratingE$rankMatch$LoserRank)), 
-                                      rep('F', length(ratingF$rankMatch$LoserRank))))]
-RankTable[Pen == "A" | Pen == "B"| Pen == "C" ,Condition := "large"]
-RankTable[Pen == "D" | Pen == "E"| Pen == "F" ,Condition := "small"]
-
-RankTable[, RankDiff := abs(WinnerRank-LoserRank)]
-RankTable[, HighRankWins := WinnerRank < LoserRank]
-
-RankTable[Code == "Avoidance"| Code == "Threat", AggressLvl := "non_physical"]
-RankTable[Code == "Peck"| Code == "Fight", AggressLvl := "physical"]
-
+#### Patterns of aggression ############
 
 
 # Plot for Dynamics of interactions by rank (small)
-ggplot(data = RankTable[Condition == "small",], mapping = aes(x = WinnerRank, y =LoserRank)) + 
+ggplot(data = RankTable[Group_Size == "small",], mapping = aes(x = WinnerRank, y =LoserRank)) + 
   #geom_smooth(se= FALSE)+#method = lm, formula = y ~ splines::bs(x, 3), se = FALSE)+
   labs(y = 'Loser rank', x= 'Winner rank')+
   theme_classic(base_size = 18)+
   theme(legend.position = "none")+
   facet_grid(. ~ Pen)+
-  #stat_density_2d(aes(fill = ..level..), geom="polygon")
-  #geom_density_2d(aes(colour = Pen), size = 2)
-  #geom_density_2d_filled(contour_var = "ndensity")
-  #geom_density_2d_filled(contour_var = "count") 
   geom_density_2d_filled(alpha = 0.7, contour_var = "ndensity")+
   geom_abline(intercept = 0 , slope = 1, linetype = "dashed", colour = 'grey')+
   geom_jitter(size = 1.2, width = 0.4)+
   xlim(0.5,20.5)+
   ylim(0.5,20.5)
 
-#facet by intensity
-ggplot(data = RankTable[Condition == "small",], mapping = aes(x = WinnerRank, y =LoserRank)) + 
-  #geom_smooth(se= FALSE)+#method = lm, formula = y ~ splines::bs(x, 3), se = FALSE)+
-  labs(y = 'Loser rank', x= 'Winner rank')+
-  theme_classic(base_size = 18)+
-  facet_grid(AggressLvl ~ Pen)+
-  #stat_density_2d(aes(fill = ..level..), geom="polygon")
-  #geom_density_2d(aes(colour = Pen), size = 2)
-  #geom_density_2d_filled(contour_var = "ndensity")
-  #geom_density_2d_filled(contour_var = "count") 
-  geom_density_2d_filled(alpha = 0.7, contour_var = "count")+
-  geom_abline(intercept = 0 , slope = 1, linetype = "dashed", colour = 'grey')+
-  geom_jitter(size = 1, width = 0.4)+
-  xlim(1,20)+
-  ylim(1,20)
 
 
 # Plot for Dynamics of interactions by rank (large)
-ggplot(data = RankTable[Condition == "large",], mapping = aes(x = WinnerRank, y =LoserRank)) + 
+ggplot(data = RankTable[Group_Size == "large",], mapping = aes(x = WinnerRank, y =LoserRank)) + 
   #geom_smooth(se= FALSE)+#method = lm, formula = y ~ splines::bs(x, 3), se = FALSE)+
   #geom_point(size = 2.5) + 
   labs(y = 'Loser rank', x= 'Winner rank')+
@@ -309,24 +301,6 @@ ggplot(data = RankTable[Condition == "large",], mapping = aes(x = WinnerRank, y 
   xlim(0.5,120)+
   ylim(0.5,120)
 
-# facet by aggression intensity
-ggplot(data = RankTable[Condition == "large",], mapping = aes(x = WinnerRank, y =LoserRank)) + 
-  #geom_smooth(se= FALSE)+#method = lm, formula = y ~ splines::bs(x, 3), se = FALSE)+
-  #geom_point(size = 2.5) + 
-  labs(y = 'Loser rank', x= 'Winner rank')+
-  theme_classic(base_size = 18)+
-  facet_grid(AggressLvl ~ Pen)+
-  #stat_density_2d(aes(fill = ..level..), geom="polygon")
-  #geom_density_2d(aes(colour = Pen), size = 2)
-  #geom_density_2d_filled(contour_var = "ndensity")
-  #geom_density_2d_filled(contour_var = "count") 
-  geom_density_2d_filled(alpha = 0.7, contour_var = "count")+
-  geom_abline(intercept = 0 , slope = 1, linetype = "dashed", colour = 'grey')+
-  geom_jitter(size = 0.6, colour = 'black')+
-  xlim(1,120)+
-  ylim(1,120)
-
-
 # Example plot for Dynamics of interactions by rank 
 ggplot(data = RankTable[Pen == "E",], mapping = aes(x = WinnerRank, y =LoserRank)) + 
   #geom_smooth(se= FALSE)+#method = lm, formula = y ~ splines::bs(x, 3), se = FALSE)+
@@ -339,60 +313,123 @@ ggplot(data = RankTable[Pen == "E",], mapping = aes(x = WinnerRank, y =LoserRank
   ylim(0.5,20.5)
 
 
-ggplot(data = RankTable[Condition == "small",], aes(x = AggressLvl, y = RankDiff))+
-  geom_boxplot(outlier.shape = NA)+
-  geom_jitter()+
-  facet_grid(.~Pen)
-ggplot(data = RankTable[Condition == "large",], aes(x = AggressLvl, y = RankDiff))+
-  geom_boxplot(outlier.shape = NA)+
-  geom_jitter()+
-  facet_grid(.~Pen)
+########### AGGRESSION Intensity #################
+
+#facet by intensity
+ggplot(data = RankTable[Group_Size == "small",], mapping = aes(x = WinnerRank, y =LoserRank)) + 
+  #geom_smooth(se= FALSE)+#method = lm, formula = y ~ splines::bs(x, 3), se = FALSE)+
+  labs(y = 'Loser rank', x= 'Winner rank')+
+  theme_classic(base_size = 18)+
+  facet_grid(AggressLvl ~ Pen)+
+  geom_density_2d_filled(alpha = 0.7, contour_var = "count")+
+  geom_abline(intercept = 0 , slope = 1, linetype = "dashed", colour = 'grey')+
+  geom_jitter(size = 1, width = 0.4)+
+  xlim(1,20)+
+  ylim(1,20)
 
 
-#TODO: how to check if dstributions are similar?
-#Aggression type by rank difference
-ggplot(data = RankTable[Condition == "small",], aes(x = RankDiff, color = AggressLvl))+
-  geom_density(size = 2)+
+# facet by aggression intensity
+ggplot(data = RankTable[Group_Size == "large",], mapping = aes(x = WinnerRank, y =LoserRank)) + 
+  #geom_smooth(se= FALSE)+#method = lm, formula = y ~ splines::bs(x, 3), se = FALSE)+
+  #geom_point(size = 2.5) + 
+  labs(y = 'Loser rank', x= 'Winner rank')+
+  theme_classic(base_size = 18)+
+  facet_grid(AggressLvl ~ Pen)+
+  geom_density_2d_filled(alpha = 0.7, contour_var = "count")+
+  geom_abline(intercept = 0 , slope = 1, linetype = "dashed", colour = 'grey')+
+  geom_jitter(size = 0.6, colour = 'black')+
+  xlim(1,120)+
+  ylim(1,120)
+
+
+
+# non-physical set as reference 0
+intensity.model = glmer( AggressBool ~ WinnerElo+ LoserElo + Situation+ Group_Size + 
+                           WinnerElo:Group_Size + Situation:WinnerElo + Group_Size:Situation +
+                           LoserElo:Group_Size + LoserElo:WinnerElo + LoserElo:Situation + (1|Pen), data = RankTable, family = binomial)
+#singularity
+intensity.model = glm( AggressBool ~ WinnerElo+ LoserElo + Situation+ Group_Size + 
+                           WinnerElo:Group_Size + Situation:WinnerElo + Group_Size:Situation +
+                           LoserElo:Group_Size + LoserElo:WinnerElo + LoserElo:Situation, data = RankTable, family = binomial)
+resid.intensity = simulateResiduals(intensity.model)
+plot(resid.intensity)
+plotResiduals(resid.intensity, form = RankTable$DiffElo) #nearly perfect
+plotResiduals(resid.intensity, form = RankTable$Group_Size) #heterogenity
+plotResiduals(resid.intensity, form = RankTable$Situation) #good
+#TODO adjust heterogneity correct with 1|rowNum?? shouts signularity issue now but hetero gone...
+intensity.model = glmer( AggressBool ~ WinnerElo+ LoserElo + Situation+ Group_Size + 
+                           WinnerElo:Group_Size + Situation:WinnerElo + Group_Size:Situation +
+                           LoserElo:Group_Size + LoserElo:WinnerElo + LoserElo:Situation + (1|rowNum), data = RankTable, family = binomial)
+
+intensity.null = glmer( AggressBool ~ 1+ (1|rowNum), data = RankTable, family = binomial)
+anova(intensity.model, intensity.null, test = "Chisq")
+
+#drop 2-way
+drop1(intensity.model, test = "Chisq") #keeo situation*Groupsize & Winner*Loser
+intensity.model = glmer(AggressBool ~ WinnerElo+ LoserElo + Situation+ Group_Size + 
+                                         Group_Size:Situation + LoserElo:WinnerElo + (1|rowNum), data = RankTable, family = binomial)
+resid.intensity = simulateResiduals(intensity.model)
+plot(resid.intensity)
+plotResiduals(resid.intensity, form = RankTable$DiffElo) #nearly perfect
+plotResiduals(resid.intensity, form = RankTable$Group_Size) #heterogenity
+plotResiduals(resid.intensity, form = RankTable$Situation) #good
+
+anova(intensity.model, intensity.null, test = "Chisq")
+
+summary(intensity.model)
+parameters(intensity.model, exponentiate = T)
+emmeans(intensity.model, ~ pairwise ~ Group_Size | Situation, type = "response")
+emmeans(intensity.model, ~ pairwise ~ Situation | Group_Size, type = "response")
+
+plot(allEffects(intensity.model))
+library(sjPlot)
+tab_model(intensity.model)
+plot_model(intensity.model, show.value = T)
+
+plot_model(intensity.model, type = "pred", terms = c("WinnerElo[all]", "LoserElo[-2, 0, 2]"))
+
+##
+#Effect plots
+#Aggression intensity by WinnerElo 
+#TODO: how can the effect be so strong if not visible?
+RankTable[ ,PredictIntens := predict(intensity.model, type = "response")]
+
+ggplot(data = RankTable, aes(x = WinnerElo, y = PredictIntens, colour = factor(AggressBool)))+
+  geom_point()+
   #facet_grid(.~Pen)+
   theme_bw(base_size = 18)
-qqplot(RankTable[Condition == "small" & AggressLvl == "non_physical",RankDiff],
-       RankTable[Condition == "small" & AggressLvl == "physical",RankDiff])
-abline(a = 0, b = 1, lty = 3)
-ks.test(RankTable[Condition == "small" & AggressLvl == "non_physical",RankDiff],
-        RankTable[Condition == "small" & AggressLvl == "physical",RankDiff])
 
-ggplot(data = RankTable[Condition == "large",], aes(x = RankDiff, color = AggressLvl))+
-  geom_density(size = 2)+
+ggplot(data = Interact, aes(x = scaleElos))+
+  geom_point(aes(y = physAggr), size = 2, colour = "red")+
+  geom_smooth(aes(x = scaleElos, y = physAggr),colour = "red")+
+  geom_point(aes(y = nonphysAggr), size = 2, colour = "blue")+
+  geom_smooth(aes(x = scaleElos, y = nonphysAggr),colour = "blue")+
+    #facet_grid(.~Pen)+
+  theme_bw(base_size = 18)
+
+ggplot(data = na.omit(Interact), aes(x = scaleElos, y = ratioIntens))+
+  geom_point( size = 2)+
+  geom_smooth()+
   #facet_grid(.~Pen)+
   theme_bw(base_size = 18)
-qqplot(RankTable[Condition == "large" & AggressLvl == "non_physical",RankDiff],
-       RankTable[Condition == "large" & AggressLvl == "physical",RankDiff])
-abline(a = 0, b = 1, lty = 3)
-ks.test(RankTable[Condition == "large" & AggressLvl == "non_physical",RankDiff],
-        RankTable[Condition == "large" & AggressLvl == "physical",RankDiff])
 
-# Aggression type by individual rank
-# by Winner rank
-ggplot(data = RankTable[Condition == "large",], aes(x = WinnerRank, color = AggressLvl))+
-  geom_density(size = 2)+
-  #facet_grid(.~Pen)+
-  theme_bw(base_size = 18)
-qqplot(RankTable[Condition == "large" & AggressLvl == "non_physical",WinnerRank],
-       RankTable[Condition == "large" & AggressLvl == "physical",WinnerRank])
-abline(a = 0, b = 1, lty = 3)
-ks.test(RankTable[Condition == "large" & AggressLvl == "non_physical",WinnerRank],
-        RankTable[Condition == "large" & AggressLvl == "physical",WinnerRank])
+plot_model(intensity.model, type = "pred", terms = c("WinnerElo[all]"))+
+  geom_rug()+
+  labs(x = "Elo of winner", y = "predicted probability for physical aggression")+
+  theme_classic(base_size = 18)
 
+#Aggression intensity by Situation and Group Size
 
-#### Aggression intensity affected by Rank or Group Size? #####
-RankTable[, AggressBool := ifelse(AggressLvl == "non_physical", 0, 1)]
+plot_model(intensity.model, type = "pred", terms = c("Group_Size", "Situation"),)+
+  theme_classic(base_size = 18)+
+
+  
+plotData <- as.data.table(emmeans(intensity.model, ~ pairwise ~ Situation | Group_Size, type = "response")$emmeans)
+
 
 
 # DIFF IN ELO
-RankTable[, DiffElo := WinnerElo-LoserElo]
 
-RankTable[DiffElo>0, .N, by = "Condition"]
-RankTable[DiffElo<0, .N, by = "Condition"]
 
 ggplot(data = RankTable, aes(x = DiffElo, y = AggressBool))+
   geom_point()+
@@ -407,32 +444,6 @@ ggplot(data = RankTable, aes(x = DiffElo, y = AggressBool))+
   geom_smooth(formula = y~x)+
   facet_grid(.~Condition)
 
-# non-physical set as reference 0
-test = glmer( AggressBool ~ DiffElo*Condition + (1|Pen), data = RankTable, family = binomial)
-resid.test = simulateResiduals(test)
-plot(resid.test)
-plotResiduals(resid.test, form = RankTable$DiffElo) #problem?
-plotResiduals(resid.test, form = RankTable$Condition) 
-test_null = glmer( AggressBool ~ 1+ (1|Pen), data = RankTable, family = binomial)
-
-anova(test, test_null, test = "Chisq")
-
-
-#drop 2-way
-drop1(test, test = "Chisq")
-test = glmer( AggressBool ~ DiffElo+Condition + (1|Pen), data = RankTable, family = binomial)
-resid.test = simulateResiduals(test)
-plot(resid.test)
-plotResiduals(resid.test, form = RankTable$DiffElo) #problem?
-plotResiduals(resid.test, form = RankTable$Condition) 
-
-anova(test, test_null, test = "Chisq")
-summary(test)
-parameters(test, exponentiate = T)
-emmeans(test, ~ Condition, type = "response")
-emmeans(test, ~ DiffElo, type = "response")
-plot(allEffects(test))
-#significant but meaningless effect?? (see magnitude)
 
 # WINNER AND LOSER ELO
 
