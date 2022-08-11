@@ -103,7 +103,7 @@ proportion_of_known <- function(input_matrix) {
   
 }
 
-elo_analysis = function(dataset, Individuals, all = FALSE){
+elo_analysis = function(dataset, Individuals){
   
   winners = dataset$Winner
   losers = dataset$Loser
@@ -215,7 +215,8 @@ elo_analysis = function(dataset, Individuals, all = FALSE){
   # 4. Individual based diagnostics
   
   # Interactions by individuals
-  if(all == FALSE){
+
+    #Overview by individual
     Individuals = data.table(ID = Individuals)
     Individuals[, Wins := sum(winners == ID), by = ID]
     Individuals[, Losses := sum(losers == ID), by = ID]
@@ -223,16 +224,34 @@ elo_analysis = function(dataset, Individuals, all = FALSE){
     Individuals$rank = ranking_rand[sort(names(ranking_rand))]
     Individuals[, sum := Wins+Losses]
     Individuals[,scaleElos := scale(elos)] 
+    Individuals[, physAggr := sum((dataset$Code == "Peck" |dataset$Code == "Fight") &
+                                    winners == ID), by = ID]
+    Individuals[, nonphysAggr := sum((dataset$Code == "Threat" |dataset$Code == "Avoidance" )&
+                                       winners == ID), by = ID]
+    Individuals[, HQ := sum(dataset$Condition == "HQ" &
+                            winners == ID), by = ID]
+    Individuals[, Feed := sum(dataset$Condition == "Feeder" &
+                                winners == ID), by = ID]
+    Individuals[, Normal := sum(dataset$Condition == "Normal" & 
+                                  winners == ID), by = ID]
+    Individuals[, physAggrRec := sum((dataset$Code == "Peck" |dataset$Code == "Fight") &
+                                    losers == ID), by = ID]
+    Individuals[, nonphysAggrRec := sum((dataset$Code == "Threat" |dataset$Code == "Avoidance" )&
+                                          losers == ID), by = ID]
+    Individuals[, HQRec := sum(dataset$Condition == "HQ" &
+                                 losers == ID), by = ID]
+    Individuals[, FeedRec := sum(dataset$Condition == "Feeder" &
+                                   losers == ID), by = ID]
+    Individuals[, NormalRec := sum(dataset$Condition == "Normal" & 
+                                     losers == ID), by = ID]
     
+    #each interaction plus end ranks and elos
     rankMatch = data.table(Winner = winners, Loser = losers, Code = dataset$Code, Situation = dataset$Condition)
     rankMatch[, WinnerRank := Individuals$rank[match(winners, Individuals$ID)]]
     rankMatch[, LoserRank := Individuals$rank[match(losers, Individuals$ID)]]
     rankMatch[, WinnerElo := Individuals$scaleElos[match(winners, Individuals$ID)]]
     rankMatch[, LoserElo := Individuals$scaleElos[match(losers, Individuals$ID)]]
 
-  }else {
-    rankMatch = NULL
-  }
   
 
   output = list(summary,rating, hierarchy_shape,uncer_repeat,uncer_split,uncer_split_rand,
