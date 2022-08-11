@@ -171,7 +171,7 @@ Interact[, ratioIntens := physAggr/(physAggr+nonphysAggr)]
 
 #fwrite(Interact, "IndividualData.csv", sep = ";")
 
-Interact = Interact[!is.na(elos),]
+Interact = na.omit(Interact)
 
 Interact[, rowNum := 1:.N]
 
@@ -226,7 +226,7 @@ plot(resid.df2) #looks great
 plotResiduals(resid.df2, form = Interact$Condition)
 plotResiduals(resid.df2, form = Interact$scaleElos)
 
-sum.model.null = glmer.nb(sum ~ 1 + (1|Pen), Interact) 
+sum.model.null = glmer.nb(sum ~ 1 + (1|Pen), Interact)#throws weird error 
 anova(sum.model, sum.model.null, test = "Chisq")
 
 #take out 2-way
@@ -262,73 +262,10 @@ ggplot(data = Interact, mapping = aes(x = scaleElos, y =sum, colour = Pen)) +
 #Who accounts for how much percentage of Interactions
 InteractSum = Interact[order(Pen, rank),]
 InteractSum[, CumSum := cumsum(sum)/(sum(sum)*0.5), by = Pen]
-InteractSum[, which(CumSum>0.8)[1]/.N, by = Pen]
+InteractSum[, which(CumSum>0.75)[1]/.N, by = Pen]
 
-#including Condition in model?
-
-InteractWide = melt(Interact, id.vars = c("ID","Pen", "Group_Size", "scaleElos"), 
-                    measure.vars = c("HQ", "Feed", "Normal"),
-                    variable.name = "Situation", 
-                    value.name = "Sum")
-
-sum.model = glmer(Sum ~ poly(scaleElos,2)*Group_Size*Situation + (1|Pen), InteractWide, family = 'poisson')
-resid.df2<- simulateResiduals(sum.model, 1000)
-plot(resid.df2) # overdispersion not good fit
-sum.model = glmer.nb(Sum ~ poly(scaleElos,2)*Group_Size*Situation + (1|Pen), InteractWide)
-resid.df2<- simulateResiduals(sum.model, 1000)
-plot(resid.df2) 
-plotResiduals(resid.df2, form = InteractWide$Group_Size)
-plotResiduals(resid.df2, form = InteractWide$Situation) #problematic?
-plotResiduals(resid.df2, form = InteractWide$scaleElos)
-
-sum.model.null = glmer.nb(Sum ~ 1 + (1|Pen), InteractWide) 
-anova(sum.model, sum.model.null, test = "Chisq")
-
-#take out 3-way
-drop1(sum.model, test = "Chisq")
-sum.model.red = glmer.nb(Sum ~ poly(scaleElos,2)*Group_Size+ Situation*Group_Size + Situation*poly(scaleElos, 2)+(1|Pen), InteractWide)
-resid.df2<- simulateResiduals(sum.model.red, 1000)
-plot(resid.df2)
-plotResiduals(resid.df2, form = InteractWide$Group_Size)
-plotResiduals(resid.df2, form = InteractWide$Situation) 
-plotResiduals(resid.df2, form = InteractWide$scaleElos)
-
-#take out 2-way
-drop1(sum.model.red, test = "Chisq")
-sum.model.red1 = glmer.nb(Sum ~ poly(scaleElos,2)+Group_Size+ Situation +(1|Pen), InteractWide)
-sum.model.red2 = glmer.nb(Sum ~ poly(scaleElos,2)*Situation +Group_Size +(1|Pen), InteractWide)
-anova(sum.model.red1, sum.model.red2)
-resid.df2<- simulateResiduals(sum.model.red1, 1000)
-plot(resid.df2)
-plotResiduals(resid.df2, form = InteractWide$Group_Size)
-plotResiduals(resid.df2, form = InteractWide$Situation) 
-plotResiduals(resid.df2, form = InteractWide$scaleElos)
-
-summary(sum.model.red2)
-summary(sum.model.red1)
-parameters(sum.model.red, exponentiate = T)
-emmeans(sum.model.red1, ~ Situation, type = "response")
-emmeans(sum.model.red2, ~pairwise ~ Situation*poly(scaleElos,2), type = "response")#doesn't work
-
-#TODO: what is better?
 
 #### Patterns of aggression ############
-
-#strategy
-diagnA$strategy
-diagnD$strategy
-diagnC$strategy
-diagnD$strategy
-diagnE$strategy
-diagnF$strategy
-
-#strategy plots
-dom_plot_strategy(diagnA$focus_pos, diagnA$blur, show_data_ci = T)
-dom_plot_strategy(diagnB$focus_pos, diagnA$blur, show_data_ci = T)
-dom_plot_strategy(diagnC$focus_pos, diagnA$blur, show_data_ci = T)
-dom_plot_strategy(diagnD$focus_pos, diagnA$blur, show_data_ci = T)
-dom_plot_strategy(diagnE$focus_pos, diagnA$blur, show_data_ci = T)
-dom_plot_strategy(diagnF$focus_pos, diagnA$blur, show_data_ci = T)
 
 
 # Plot for Dynamics of interactions by rank (small)
@@ -426,8 +363,7 @@ intensity.model = glmer( AggressBool ~ WinnerElo+ LoserElo + Situation+ Group_Si
 
 intensity.null = glmer( AggressBool ~ 1+ (1|rowNum), data = RankTable, family = binomial)
 anova(intensity.model, intensity.null, test = "Chisq")
-library(car)
-vif(intensity.model)
+
 #drop 2-way
 drop1(intensity.model, test = "Chisq") #keeo situation*Groupsize & Winner*Loser
 intensity.model = glmer(AggressBool ~ WinnerElo+ LoserElo + Situation+ Group_Size + 
@@ -442,7 +378,8 @@ anova(intensity.model, intensity.null, test = "Chisq")
 
 summary(intensity.model)
 parameters(intensity.model, exponentiate = T)
-emmeans(intensity.model, ~ pairwise ~ Group_Size*Situation, type = "response")
+emmeans(intensity.model, ~ pairwise ~ Group_Size | Situation, type = "response")
+emmeans(intensity.model, ~ pairwise ~ Situation | Group_Size, type = "response")
 
 plot(allEffects(intensity.model))
 library(sjPlot)
@@ -484,122 +421,212 @@ plot_model(intensity.model, type = "pred", terms = c("WinnerElo[all]"))+
 #Aggression intensity by Situation and Group Size
 
 plot_model(intensity.model, type = "pred", terms = c("Group_Size", "Situation"),)+
-  theme_classic(base_size = 18)
+  theme_classic(base_size = 18)+
 
   
-plotData <- as.data.table(emmeans(intensity.model, ~ pairwise ~ Situation*Group_Size, type = "response")$emmeans)
-
-observedProb = RankTable[, .(prob = sum(AggressBool)/.N), by= .(Group_Size, Situation)]
-
-contrast = as.data.table(emmeans(intensity.model, ~ pairwise ~ Group_Size*Situation, type = "response")$contrasts)
+plotData <- as.data.table(emmeans(intensity.model, ~ pairwise ~ Situation | Group_Size, type = "response")$emmeans)
 
 
-library(ggsignif)
-p = ggplot(plotData, aes(x = Group_Size, y = prob))+
-  geom_pointrange(aes(shape = Situation, ymin = asymp.LCL, ymax = asymp.UCL), position = position_dodge(width = 0.75), size = 1.5)+
-  #geom_point(data = observedProb, aes(shape = Situation), position = position_jitterdodge(jitter.width = 0.3) , size = 3, colour = "grey")+
-  labs(x = "Group size", y= "Predicted probability for high intensity aggression")+
-  ylim(0.1,1)+
-  theme_classic(base_size = 18)
-  
-p +   geom_signif( #large Feeder vs. large HQ
-  annotation = "**",#formatC(contrast$p.value[2], digits = 1),
-  y_position = 0.65, xmin = 0.75, xmax = 0.99,
-  tip_length = c(0.2, 0.1),
-  textsize = 8,
-  size = 1
-) +
-  
-  geom_signif( #large HQ vs. large Normal
-    annotation = "***",#formatC(contrast$p.value[11], digits = 1),
-    y_position = 0.65, xmin = 1.01, xmax = 1.25,
-    tip_length = c(0.1, 0.3),
-    textsize = 8,
-    size = 1
-  )+
-  
-  geom_signif( #large Feeder vs. large Normal
-    annotation = "0.06",#formatC(contrast$p.value[11], digits = 1),
-    y_position = 0.75, xmin = 0.75, xmax = 1.25,
-    tip_length = c(0.1, 0.1),
-    textsize = 5,
-    size = 1
-  )+
-geom_signif( #small Feeder vs. small HQ
-  annotation = "***",#formatC(contrast$p.value[7], digits = 1),
-  y_position = 0.8, xmin = 1.75, xmax = 1.99,
-  tip_length = c(0.2, 0.04),
-  textsize = 8,
-  size = 1
-) +
-  
-  geom_signif( #small HQ vs. small Normal
-    annotation = "**",#formatC(contrast$p.value[14], digits = 1),
-    y_position = 0.8, xmin = 2.01, xmax = 2.25,
-    tip_length = c(0.04, 0.2),
-    textsize = 8,
-    size = 1
-  )+
-  
-  geom_signif( #small HQ vs. large HQ
-    annotation = "*",#formatC(contrast$p.value[10], digits = 1),
-    y_position = 0.95, xmin = 1, xmax = 2,
-    tip_length = c(0.25, 0.1),
-    textsize = 8,
-    size = 1
-  )
+
+# DIFF IN ELO
 
 
-####################### Individual contacts data ######################################
+ggplot(data = RankTable, aes(x = DiffElo, y = AggressBool))+
+  geom_point()+
+  geom_smooth(formula = y~x)
 
-#How many individuals does one hen interact with? 
+ggplot(data = RankTable[, .N, by = .(Condition, AggressBool)], aes(x = Condition, fill = as.factor(AggressBool), y = N))+
+  geom_bar(stat = "identity", position=position_dodge())+
+  theme_bw(base_size = 18)
 
-#create unique identifier
-RankTable[, IDWinner := paste0(Pen, Winner)]
-RankTable[, IDLoser := paste0(Pen, Loser)]
-Interact[, uniqueID := paste0(Pen, ID)]
+ggplot(data = RankTable, aes(x = DiffElo, y = AggressBool))+
+  geom_point()+
+  geom_smooth(formula = y~x)+
+  facet_grid(.~Condition)
 
-#extract unique Interaction companions
-UniqueContacts1 = RankTable[,.(InteractUniq = unique(IDLoser) ), by = (IDWinner)]
-UniqueContacts2 = RankTable[,.(InteractUniq = unique(IDWinner) ), by = (IDLoser)]
-#rename column to same name for rbind
-colnames(UniqueContacts1)[1] <- "uniqueID" 
-colnames(UniqueContacts2)[1] <- "uniqueID"
+
+# WINNER AND LOSER ELO
+
+ggplot(data = RankTable, aes(x = WinnerElo, y = AggressBool))+
+  geom_point()+
+  geom_smooth(formula = y~x, method="glm",method.args=list(family="binomial"))
+ggplot(data = RankTable, aes(x = LoserElo, y = AggressBool))+
+  geom_point()+
+  geom_smooth(formula = y~x, method="glm",method.args=list(family="binomial"))
+
+ggplot(data = RankTable, aes(x = WinnerElo, y = AggressBool))+
+  geom_point()+
+  geom_smooth(formula = y~x, method="glm",method.args=list(family="binomial"))+
+  facet_grid(.~Condition)
+ggplot(data = RankTable, aes(x = LoserElo, y = AggressBool))+
+  geom_point()+
+  geom_smooth(formula = y~x, method="glm",method.args=list(family="binomial"))+
+  facet_grid(.~Condition)
+
+# non-physical set as reference 0
+test = glmer( AggressBool ~ WinnerElo*LoserElo*Condition + (1|Pen), data = RankTable, family = binomial)
+resid.test = simulateResiduals(test)
+plot(resid.test)
+plotResiduals(resid.test, form = RankTable$WinnerElo) #okay?
+plotResiduals(resid.test, form = RankTable$LoserElo) 
+plotResiduals(resid.test, form = RankTable$Condition) 
+test_null = glmer( AggressBool ~ 1+ (1|Pen), data = RankTable, family = binomial)
+anova(test, test_null, test = "Chisq")
+
+#drop 3-way
+drop1(test, test = "Chisq")
+test = glmer( AggressBool ~ WinnerElo*Condition + WinnerElo*LoserElo + LoserElo*Condition + (1|Pen), data = RankTable, family = binomial)
+resid.test = simulateResiduals(test)
+plot(resid.test)
+plotResiduals(resid.test, form = RankTable$WinnerElo) #okay?
+plotResiduals(resid.test, form = RankTable$LoserElo) 
+plotResiduals(resid.test, form = RankTable$Condition) 
+
+#drop 2-way
+drop1(test, test = "Chisq")
+test = glmer( AggressBool ~ WinnerElo*LoserElo+ Condition+ (1|Pen), data = RankTable, family = binomial)
+resid.test = simulateResiduals(test)
+plot(resid.test)
+plotResiduals(resid.test, form = RankTable$WinnerElo) #okay?
+plotResiduals(resid.test, form = RankTable$LoserElo) 
+plotResiduals(resid.test, form = RankTable$Condition) 
+
+
+anova(test, test_null, test = "Chisq")
+summary(test)
+parameters(test, exponentiate = T)
+emmeans(test, ~ Condition, type = "response")
+emmeans(test, ~ WinnerElo, type = "response")
+plot(allEffects(test))
+#significant but meaningless effect?? (see magnitude)
+
+
+
+
+#other plots
+ggplot(data = RankTable[Condition == "large",], aes(x = LoserRank, color = AggressLvl))+
+  geom_density(size = 2)+
+  #facet_grid(.~Pen)+
+  theme_bw(base_size = 18)
+qqplot(RankTable[Condition == "large" & AggressLvl == "non_physical",LoserRank],
+       RankTable[Condition == "large" & AggressLvl == "physical",LoserRank])
+abline(a = 0, b = 1, lty = 3)
+ks.test(RankTable[Condition == "large" & AggressLvl == "non_physical",LoserRank],
+        RankTable[Condition == "large" & AggressLvl == "physical",LoserRank])
+
+
+ggplot(data = RankTable[Condition == "small",], aes(x = WinnerRank, color = AggressLvl))+
+  geom_density(size = 2)+
+  #facet_grid(.~Pen)+
+  theme_bw(base_size = 18)
+qqplot(RankTable[Condition == "small" & AggressLvl == "non_physical",WinnerRank],
+       RankTable[Condition == "small" & AggressLvl == "physical",WinnerRank])
+abline(a = 0, b = 1, lty = 3)
+ks.test(RankTable[Condition == "small" & AggressLvl == "non_physical",WinnerRank],
+        RankTable[Condition == "small" & AggressLvl == "physical",WinnerRank])
+
+ggplot(data = RankTable[Condition == "small",], aes(x = LoserRank, color = AggressLvl))+
+  geom_density(size = 2)+
+  #facet_grid(.~Pen)+
+  theme_bw(base_size = 18)
+qqplot(RankTable[Condition == "small" & AggressLvl == "non_physical",LoserRank],
+       RankTable[Condition == "small" & AggressLvl == "physical",LoserRank])
+abline(a = 0, b = 1, lty = 3)
+ks.test(RankTable[Condition == "small" & AggressLvl == "non_physical",LoserRank],
+        RankTable[Condition == "small" & AggressLvl == "physical",LoserRank])
+
+
+#fwrite(rbind(InteractionSmall, InteractionLarge), file = "InteractionsRank.csv", sep = ";")
+
+######## AGGRESSION BY CONDITION ##############
+ggplot(data = RankTable[Condition == "small",], aes(x = RankDiff, color = AggressLvl))+
+  geom_density(size = 2)+
+  facet_grid(.~Situation)+
+  theme_bw(base_size = 18)
+
+ggplot(data = RankTable[Condition == "large",], aes(x = RankDiff, color = AggressLvl))+
+  geom_density(size = 2)+
+  facet_grid(.~Situation)+
+  theme_bw(base_size = 18)
+
+
+ggplot(data = RankTable[Condition == "small",], aes(x = LoserRank, color = AggressLvl))+
+  geom_density(size = 2)+
+  facet_grid(Pen~Situation)+
+  theme_bw(base_size = 18)
+
+
+##### Individual contacts data ###########
+
+RankTable[, IndividWin := paste0(Pen, Winner)]
+RankTable[, IndividLos := paste0(Pen, Loser)]
+Interact[, Individual := paste0(Pen, ID)]
+
+UniqueContacts1 = RankTable[,.(InteractUniq = unique(IndividLos) ), by = (IndividWin)]
+UniqueContacts1 = RankTable[,.(InteractUniq = unique(IndividWin) ), by = (IndividLos)]
+colnames(UniqueContacts1)[1] <- "Individual" 
+colnames(UniqueContacts2)[1] <- "Individual"
+
 UniqueContacts = rbind(UniqueContacts1, UniqueContacts2)
-
-#order and delete duplicate entries
-UniqueContacts = UniqueContacts[order(uniqueID, InteractUniq), ]
-UniqueContacts[, dupl := rleid(uniqueID, InteractUniq)]
+UniqueContacts = UniqueContacts[order(Individual, InteractUniq), ]
+UniqueContacts[, dupl := rleid(Individual, InteractUniq)]
 UniqueContacts[, duplBool := duplicated(dupl)]
 UniqueContacts = UniqueContacts[duplBool == F,]
 
-#summary per individual
-UniqueContactsN = UniqueContacts[, .(Contacts = .N), by = "uniqueID"] 
+UniqueContactsN = UniqueContacts[, .(Contacts = .N), by = "Individual"] 
 
-#add to Individual overview table
-Interact = Interact[UniqueContactsN, on = .(uniqueID)]
+Interact = Interact[UniqueContactsN, on = .(Individual)]
 
-#summaries
 Interact[, .(max = max(Contacts), min = min(Contacts), median = median(Contacts)), by = Pen]
 
-# Plot for Dynamics of interactions by Elo
-ggplot(data = Interact, mapping = aes(x = scaleElos, y =Contacts, colour = Pen)) + 
+# Plot for Dynamics of interactions by rank (small)
+ggplot(data = Interact[Condition == 'small',], mapping = aes(x = rank, y =Contacts, colour = Pen)) + 
   geom_smooth(se= FALSE)+#method = lm, formula = y ~ splines::bs(x, 3), se = FALSE)+
   geom_point(size = 2.5) + 
   labs(x = 'Rank', y = 'Number of unique Contacts')+
   theme_classic(base_size = 18)
 
-#Do large group high ranking interact with other high ranking?
-RankTable[WinnerRank == 1, .(min = min(LoserRank), max = max(LoserRank)), by = Pen]
-RankTable[WinnerRank == 2, .(min = min(LoserRank), max = max(LoserRank)), by = Pen]
-RankTable[WinnerRank == 3, .(min = min(LoserRank), max = max(LoserRank)), by = Pen]
-RankTable[WinnerRank == 4, .(min = min(LoserRank), max = max(LoserRank)), by = Pen]
-RankTable[WinnerRank == 5, .(min = min(LoserRank), max = max(LoserRank)), by = Pen]
 
+# Plot for Dynamics of interactions by rank (large)
+ggplot(data = Interact[Condition == 'large',], mapping = aes(x = rank, y = Contacts, colour = Pen)) + 
+  geom_smooth(se= FALSE)+#method = lm, formula = y ~ splines::bs(x, 3), se = FALSE)+
+  geom_point(size = 2.5) + 
+  labs(x = 'Rank', y = 'Number of unique Contacts')+
+  theme_classic(base_size = 18)
 
-###### Examples of steepness plots ##############
+Contacts.model = glmer(Contacts ~ poly(scaleElos,2)*Condition + (1|Pen) + (1|rowNum), Interact, family = 'poisson')
+resid.df2<- simulateResiduals(Contacts.model, 1000)
+plot(resid.df2)
+plotResiduals(resid.df2, form = Interact$Condition)
+plotResiduals(resid.df2, form = Interact$scaleElos)
+#heterogenity and uniformity issues
 
-#examples for hierarchy shape
+Contacts.model.null = glmer(Contacts ~ 1 + (1|Pen) + (1|rowNum), Interact, family = 'poisson')
+anova(Contacts.model, Contacts.model.null, test = "Chisq")
+
+#check negative binomial fit
+Contacts.model2 = glmer.nb(Contacts ~ poly(scaleElos,2)*Condition + (1|Pen), Interact)
+resid.df2<- simulateResiduals(Contacts.model2, 1000) # heterogenity
+plot(resid.df2)
+plotResiduals(resid.df2, form = Interact$Condition) # heterogenity
+plotResiduals(resid.df2, form = Interact$scaleElos)
+
+library("glmmTMB")
+Contacts.nbm0 = glmmTMB(Contacts~poly(scaleElos,2)*Condition + (1|Pen),disp=~Condition, Interact, family=nbinom2,
+                        control = glmmTMBControl(optimizer = optim, 
+                                                 optArgs = list(method="BFGS",iter.max=1e50,eval.max=1e50)))
+resid.df2<- simulateResiduals(Contacts.nbm0, 1000) # heterogenity
+plot(resid.df2)
+plotResiduals(resid.df2, form = Interact$Condition) # heterogenity
+plotResiduals(resid.df2, form = Interact$scaleElos)
+
+drop1(Contacts.nbm0, test = "Chisq") # nope no drop
+summary(Contacts.nbm0)
+# important though????? -> obvious that large groups can have more contacts, median more interesting
+
+#Do large group high ranking inetract with other high ranking?
+
+###### Steepness plots ##############
 
 ratingA$hierarchy_shape_rand$plot
 
@@ -621,7 +648,7 @@ p2 = ratingE$hierarchy_shape_rand$plot+
   labs(x = "Difference in rank", y = "Probability that high rank wins")
 
 
-##### Examples of hierarchy plots #######
+##### Hierrachy plots #######
 
 mean.eloM = rowMeans(ratingE$randElo)
 identitiesM = rownames(ratingE$randElo)
@@ -675,3 +702,82 @@ ggplot(plotTable, aes(x = number, y= ranks))+
 
 
 
+##### clustering ############
+
+
+
+Interact_clean = Interact[!is.na(rank),]
+
+#PCA on wins losses and elo
+interact.pca = prcomp(Interact_clean[,c(2,3, 4)], center = T, scale = TRUE)
+
+summary(interact.pca)
+str(interact.pca)
+
+autoplot(interact.pca, data =Interact_clean, colour = 'Pen', size = 3, loadings = T,  loadings.label=T,scale =0) #to see individuals use label= T
+
+
+set.seed(1)
+interact.kmeans = kmeans(Interact_clean[,c(2,3, 4)], centers = 3)
+plot(interact.kmeans, data = Interact_clean, size= 3)
+
+Interact_clean[, cluster := as.factor(interact.kmeans$cluster)]
+Interact_clean = Interact_clean[order(Pen,rank),]
+
+
+ggplot(data = Interact_clean, mapping = aes(x = cluster, y = rank, fill = Condition)) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_point(position = position_jitterdodge(), alpha= 0.4, size = 2)+
+  theme_classic(base_size = 18)
+
+
+
+descdist(Interact_clean$sum, discrete = FALSE)
+poisson = fitdist(Interact_clean$sum, 'poisson')
+gamma = fitdist(Interact_clean$sum, 'gamma')
+plot(gamma)
+
+
+modelInteract = glmer.nb(sum ~ cluster*Condition + (1|Pen), Interact_clean)
+
+#IDEA: do on exact scaled ELo-rating instead of rank or cluster
+# vergleich cluster und Elo-rating (verteilung, skalieren)
+modelInteract2 = glmer.nb(sum ~ poly(scaleElos,2)*Condition + (1|Pen), Interact)
+# how to interpret this????
+resid.df1<- simulateResiduals(modelInteract, 500)
+resid.df2<- simulateResiduals(modelInteract2, 500)
+plot(resid.df1)
+plot(resid.df2)
+summary(modelInteract2)
+Interact_clean$CC <- interaction(Interact_clean$cluster, Interact_clean$Condition)
+modelInteract_CC = glmer.nb(sum ~ CC + (1|Pen), Interact_clean)
+#estimates r?ckrechnen e^estimate 
+
+summary(glht(modelInteract_CC,linfct=mcp(CC="Tukey")))
+
+
+Interact_scale = Interact_clean
+Interact_scale[,scaleWins := scale(Wins), by = Pen]
+Interact_scale[,scaleLosses := scale(Losses), by = Pen]
+Interact_scale[,scaleElos := scale(elos), by =  Pen]
+
+sample <- sample(c(TRUE, FALSE), nrow(Interact_scale), replace=TRUE, prob=c(0.7,0.3))
+train <- data.table(Interact_scale[sample, ])
+test <- data.table(Interact_scale[!sample, ]) 
+lda_model <- lda(cluster~Wins + Losses +elos, data=train)
+predicted <- predict(lda_model, test)
+
+mean(predict(lda_model, train)$class == train$cluster)
+mean(predicted$class==test$cluster)
+ggord(lda_model, train$cluster)
+
+#reducing
+
+
+######
+# survival on 
+
+#model = survfit(Surv(sum(Wins), sum(Losses))~RankDiff, data=DATA)
+# summary(model)
+# plot(model)
+#coxph(Surv(Wins,Losses)~RankDiff, data) how likely that with higher rank you have a higher chance to win
