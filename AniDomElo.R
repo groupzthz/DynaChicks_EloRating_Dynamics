@@ -23,6 +23,7 @@ library(emmeans) #model means
 library(effects) #model effects visualisation
 library(RColorBrewer) # color for plotting
 library(EloSteepness) # for steepness measure
+library(sjPlot)
 source('helper_functions_Elo.R')
 set.seed(42)
 
@@ -212,53 +213,46 @@ ggplot(Interact[Group_Size == 'large',],aes(x = rank, y = ratio, colour = Pen)) 
   geom_point()+
   geom_smooth(se = F)
 
-
+#old model
 #model for the number of interactions by Elo
-sum.model = glmer(sum ~ poly(scaleElos,2)*Group_Size + (1|Pen), Interact, family = 'poisson')
-resid.df2<- simulateResiduals(sum.model, 1000)
-plot(resid.df2) # overdispersion not good fit
-plotResiduals(resid.df2, form = Interact$Condition)
-plotResiduals(resid.df2, form = Interact$scaleElos)
-#try negative binomial fit to compensate overdispersal
-sum.model = glmer.nb(sum ~ poly(scaleElos,2)*Group_Size + (1|Pen), Interact)
-resid.df2<- simulateResiduals(sum.model, 1000)
-plot(resid.df2) #looks great
-plotResiduals(resid.df2, form = Interact$Condition)
-plotResiduals(resid.df2, form = Interact$scaleElos)
+# sum.model = glmer(sum ~ poly(scaleElos,2)*Group_Size + (1|Pen), Interact, family = 'poisson')
+# resid.df2<- simulateResiduals(sum.model, 1000)
+# plot(resid.df2) # overdispersion not good fit
+# plotResiduals(resid.df2, form = Interact$Condition)
+# plotResiduals(resid.df2, form = Interact$scaleElos)
+# #try negative binomial fit to compensate overdispersal
+# sum.model = glmer.nb(sum ~ poly(scaleElos,2)*Group_Size + (1|Pen), Interact)
+# resid.df2<- simulateResiduals(sum.model, 1000)
+# plot(resid.df2) #looks great
+# plotResiduals(resid.df2, form = Interact$Condition)
+# plotResiduals(resid.df2, form = Interact$scaleElos)
+# 
+# sum.model.null = glmer.nb(sum ~ 1 + (1|Pen), Interact) 
+# anova(sum.model, sum.model.null, test = "Chisq")
+# 
+# #take out 2-way
+# drop1(sum.model, test = "Chisq")
+# sum.model.red = glmer.nb(sum ~ poly(scaleElos,2) + Group_Size + (1|Pen), Interact)
+# resid.df2<- simulateResiduals(sum.model.red, 1000)
+# plot(resid.df2)
+# plotResiduals(resid.df2, form = Interact$Condition)
+# plotResiduals(resid.df2, form = Interact$scaleElos)
+# 
+# summary(sum.model.red)
+# summary(emtrends(sum.model.red, ~ scaleElos, "scaleElos", max.degree = 2, type = "response"), infer = c(T,T))
+# summary(allEffects(sum.model.red))
+#calculate in percent from hand
+# round((negbinom$family$linkinv(estimate)-1)*100)
+# round((negbinom$family$linkinv(estimate-sd)-1)*100)
+# round((negbinom$family$linkinv(estimate+sd)-1)*100)
+#https://stats.stackexchange.com/questions/365623/how-to-report-negative-binomial-regression-results-from-r
 
-sum.model.null = glmer.nb(sum ~ 1 + (1|Pen), Interact) 
-anova(sum.model, sum.model.null, test = "Chisq")
-
-#take out 2-way
-drop1(sum.model, test = "Chisq")
-sum.model.red = glmer.nb(sum ~ poly(scaleElos,2) + scaleElos + Group_Size + (1|Pen), Interact)
-resid.df2<- simulateResiduals(sum.model.red, 1000)
-plot(resid.df2)
-plotResiduals(resid.df2, form = Interact$Condition)
-plotResiduals(resid.df2, form = Interact$scaleElos)
-
-summary(sum.model.red)
-summary(emtrends(sum.model.red, ~ scaleElos, "scaleElos", max.degree = 2, type = "response"), infer = c(T,T))
-parameters(sum.model.red, exponentiate = T) #TODO something wrong here...
-
-Interact[, PredictSum := (predict(sum.model.red, type = "response"))]
-#TODO: how to get CI for plot?? se.fit in predicted doesn't work for glmer
+#Interact[, PredictSum := (predict(sum.model.red, type = "response"))]
+#how to get CI for plot?? se.fit in predicted doesn't work for glmer
 #Interact[, LCISum := exp(predict(sum.model.red)- 1.96 * se.fit)]
 #Interact[, UCISum := exp(predict(sum.model.red))]
+#Yamenah will check if possible, might try without
 
-
-largeCol = brewer.pal(n = 8, name = "Blues")[c(4,6,8)]
-smallCol = brewer.pal(n = 8, name = "OrRd")[c(4,6,8)]
-
-#effect plot of Elo and number of interactions split by group
-ggplot(data = Interact, mapping = aes(x = scaleElos, y =sum, colour = Pen)) + 
-       geom_smooth(aes(x = scaleElos, y = PredictSum), se= FALSE)+#method = glmer.nb, formula = y ~ splines::bs(x, 3), se = FALSE)+
-       geom_point(size = 2.5) + 
-       labs(x = 'scaled Elo rating', y = 'Number of Interactions')+
-       facet_grid(.~ Group_Size) + 
-      theme_bw(base_size = 18)+
-   scale_color_manual(values=c(largeCol, smallCol))+
-     theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank())
 
 #Who accounts for how much percentage of Interactions
 InteractSum = Interact[order(Pen, rank),]
@@ -267,8 +261,13 @@ InteractSum[, which(CumSum>0.8)[1]/.N, by = Pen]
 
 #including Condition in model?
 
-InteractWide = melt(Interact, id.vars = c("ID","Pen", "Group_Size", "scaleElos"), 
-                    measure.vars = c("HQ", "Feed", "Normal"),
+#ERST BERECHNEN WIE DIE SUMME ALLER HQ ETC IS
+InteractSum[, HQ_all := HQ + HQRec]
+InteractSum[, Feed_all := Feed + FeedRec]
+InteractSum[, Normal_all := Normal + NormalRec]
+
+InteractWide = melt(InteractSum, id.vars = c("ID","Pen", "Group_Size", "scaleElos"), 
+                    measure.vars = c("HQ_all", "Feed_all", "Normal_all"),
                     variable.name = "Situation", 
                     value.name = "Sum")
 
@@ -281,87 +280,106 @@ ggplot(InteractWide, mapping = aes(x = scaleElos, y =Sum))+#, colour = Pen)) +
   scale_color_manual(values=c(largeCol, smallCol))+
   theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank())
 
-#poly not necessary any longer?
-sum.model = glmer(Sum ~ scaleElos*Group_Size*Situation + (1|Pen), InteractWide, family = 'poisson')
+InteractWide[, rowNum := 1:.N]
+#start with max two-way interactions & poly not interacting
+sum.model = glmer(Sum ~ poly(scaleElos,2) + scaleElos*Group_Size+ Situation*Group_Size + Situation*scaleElos+(1|Pen), InteractWide, family = 'poisson')
 resid.df2<- simulateResiduals(sum.model, 1000)
-plot(resid.df2) # overdispersion not good fit
-sum.model = glmer.nb(Sum ~ scaleElos*Group_Size*Situation + (1|Pen), InteractWide)
+plot(resid.df2) # overdispersion not good fit -> negative binomial
+sum.model = glmer.nb(Sum ~ poly(scaleElos,2) + scaleElos*Group_Size+ Situation*Group_Size + Situation*scaleElos+(1|Pen), InteractWide)
 resid.df2<- simulateResiduals(sum.model, 1000)
 plot(resid.df2) 
 plotResiduals(resid.df2, form = InteractWide$Group_Size)
 plotResiduals(resid.df2, form = InteractWide$Situation) #problematic?
 plotResiduals(resid.df2, form = InteractWide$scaleElos)
 
+
 sum.model.null = glmer.nb(Sum ~ 1 + (1|Pen), InteractWide) 
 anova(sum.model, sum.model.null, test = "Chisq")
 
-#take out 3-way
-drop1(sum.model, test = "Chisq")
-sum.model.red = glmer.nb(Sum ~ scaleElos*Group_Size+ Situation*Group_Size + Situation*scaleElos+(1|Pen), InteractWide)
-resid.df2<- simulateResiduals(sum.model.red, 1000)
-plot(resid.df2)
-plotResiduals(resid.df2, form = InteractWide$Group_Size)
-plotResiduals(resid.df2, form = InteractWide$Situation) 
-plotResiduals(resid.df2, form = InteractWide$scaleElos)
-
 #take out 2-way
-drop1(sum.model.red, test = "Chisq")
-sum.model.red1 = glmer.nb(Sum ~ scaleElos+Group_Size+ Situation +(1|Pen), InteractWide)
-sum.model.red2 = glmer.nb(Sum ~ scaleElos*Situation +Group_Size +(1|Pen), InteractWide)
-anova(sum.model.red1, sum.model.red2)
+drop1(sum.model, test = "Chisq")
+sum.model.red1 = glmer.nb(Sum ~ poly(scaleElos,2)+Group_Size +Situation+(1|Pen), InteractWide)
+anova(sum.model.red1, sum.model.null)
 resid.df2<- simulateResiduals(sum.model.red1, 1000)
 plot(resid.df2)
 plotResiduals(resid.df2, form = InteractWide$Group_Size)
-plotResiduals(resid.df2, form = InteractWide$Situation) 
+plotResiduals(resid.df2, form = InteractWide$Situation) #problematic?
 plotResiduals(resid.df2, form = InteractWide$scaleElos)
 
-summary(sum.model.red2)
-summary(sum.model.red1)
-parameters(sum.model.red, exponentiate = T)
-emmeans(sum.model.red1, ~ pairwise ~Situation, type = "response")
-emmeans(sum.model.red2, ~pairwise ~ Situation*scaleElos, type = "response")#doesn't work
+#check if situation makes model better
+sum.model.red2 = glmer.nb(Sum ~ poly(scaleElos,2)+Group_Size+(1|Pen), InteractWide)
+anova(sum.model.red1, sum.model.red2)
+sum.model.red2 = glmer.nb(Sum ~ Situation+Group_Size+(1|Pen), InteractWide)
+anova(sum.model.red1, sum.model.red2)
 
-ggplot(InteractWide, mapping = aes(x = scaleElos, y =Sum))+#, colour = Pen)) + 
-  geom_smooth()+#method = glmer.nb, formula = y ~ splines::bs(x, 3), se = FALSE)+
+
+
+#results makes sense (see plot) take results as are
+ggplot(InteractWide, aes(x = Situation, y = Sum))+
+  geom_boxplot()+
+  facet_grid(.~Group_Size)
+
+summary(sum.model.red1)
+summary(allEffects(sum.model.red1))
+test = emmeans(sum.model.red1, ~ pairwise ~Situation, type = "response")
+plot(test, comparison = TRUE) +theme_bw()
+tab_model(sum.model.red1) #still very high
+plot(predictorEffects(sum.model.red1), lines=list(multiline=TRUE))
+
+ref.grid.Elo = emtrends(sum.model.red1, var = "scaleElos", type = "response")
+emt <- emtrends(sum.model.red1, ~ degree | scaleElos, "scaleElos", max.degree = 2,
+                at = list(percent = c(9, 13.5, 18)))
+summary(emt, infer = c(TRUE, TRUE))
+
+#change refgrid to keep all Elo values to predict value for each individual
+gridFull = ref_grid(sum.model.red1, cov.keep = "scaleElos")
+
+predictAtElo = summary(emmeans(gridFull, "scaleElos", type = "response"))
+
+
+InteractWide[, PredictSum := (predict(sum.model.red1, type = "response"))]
+Interact[order(Group_Size, scaleElos), PredictSum2 := predictAtElo$response]
+
+
+largeCol = brewer.pal(n = 8, name = "Blues")[c(4,6,8)]
+smallCol = brewer.pal(n = 8, name = "OrRd")[c(4,6,8)]
+
+#effect plot of Elo and number of interactions split by group
+ggplot(data = Interact, mapping = aes(x = scaleElos, y =sum, colour = Pen)) + 
+  geom_smooth(aes(x = scaleElos, y = PredictSum2), se= FALSE)+#method = glmer.nb, formula = y ~ splines::bs(x, 3), se = FALSE)+
   geom_point(size = 2.5) + 
   labs(x = 'scaled Elo rating', y = 'Number of Interactions')+
-  #facet_grid(Situation~ Group_Size) + 
+  facet_grid(.~ Group_Size) + 
+  theme_bw(base_size = 18)+
+  scale_color_manual(values=c(largeCol, smallCol))+
+  theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank())
+
+#effect plot of Elo and number of interactions split by Situation
+ggplot(data = InteractWide, mapping = aes(x = scaleElos, y =Sum, colour = Pen)) + 
+  geom_smooth(aes(x = scaleElos, y = PredictSum), se= FALSE)+#method = glmer.nb, formula = y ~ splines::bs(x, 3), se = FALSE)+
+  geom_point(size = 2.5) + 
+  labs(x = 'scaled Elo rating', y = 'Number of Interactions')+
+  facet_grid(Group_Size~ Situation) + 
   theme_bw(base_size = 18)+
   scale_color_manual(values=c(largeCol, smallCol))+
   theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank())
 
 
-#TODO: what is better?
-#Or just situaton without elo?
-situation.model = glmer(Sum ~ Group_Size*Situation + (1|Pen), InteractWide, family = 'poisson')
-resid.df2<- simulateResiduals(situation.model, 1000)
-plot(resid.df2) #overdispersal
-situation.model = glmer.nb(Sum ~ Group_Size*Situation + (1|Pen), InteractWide)
-resid.df2<- simulateResiduals(situation.model, 1000)
-plot(resid.df2)#heterogenity
-plotResiduals(resid.df2, form = InteractWide$Group_Size)
-plotResiduals(resid.df2, form = InteractWide$Situation) 
-InteractWide[, nrow := 1:.N]
-situation.model = glmer.nb(Sum ~ Group_Size*Situation + (1|Pen) + (1|nrow), InteractWide)
-resid.df2<- simulateResiduals(situation.model, 1000)
-plot(resid.df2)#singularity
-plotResiduals(resid.df2, form = InteractWide$Group_Size)
-plotResiduals(resid.df2, form = InteractWide$Situation) 
-situation.model = glmer.nb(Sum ~ Group_Size*Situation + (1|nrow), InteractWide)
-resid.df2<- simulateResiduals(situation.model, 1000)
-plot(resid.df2)
-plotResiduals(resid.df2, form = InteractWide$Group_Size)
-plotResiduals(resid.df2, form = InteractWide$Situation) 
 
-drop1(situation.model, test = "Chisq")
-situation.model = glmer.nb(Sum ~ Group_Size+Situation + (1|nrow), InteractWide)
-resid.df2<- simulateResiduals(situation.model, 1000)
-plot(resid.df2)
-plotResiduals(resid.df2, form = InteractWide$Group_Size)
-plotResiduals(resid.df2, form = InteractWide$Situation) 
+#plot Effects of Situation
+plotData <- as.data.table(emmeans(sum.model.red1, ~ pairwise ~Situation, type = "response")$emmeans)
 
-summary(situation.model)
-emmeans(situation.model, ~pairwise ~ Situation, type = "response")
+ggplot(plotData, aes(x = Situation, y = response))+
+  geom_pointrange(data = InteractWide[, .(median = median(Sum), 
+                                     q1 = quantile(Sum, 0.25),
+                                     q2 = quantile(Sum, 0.75)),by = Situation], 
+             aes(x = Situation, y= median, ymin = q1, ymax = q2), size = 1, colour = "grey")+
+  geom_pointrange(aes(ymin = asymp.LCL, ymax = asymp.UCL), size = 1)+
+  
+  labs(x = "Situation", y= "Predicted number of interactions by individuals")+
+  scale_x_discrete(labels=c("HQ", "Feed", "Normal"))+
+  theme_classic(base_size = 18)
+
 
 #### Patterns of aggression ############
 
@@ -468,21 +486,17 @@ intensity.model = glm( AggressBool ~ WinnerElo+ LoserElo + Situation+ Group_Size
 resid.intensity = simulateResiduals(intensity.model)
 plot(resid.intensity)
 plotResiduals(resid.intensity, form = RankTable$DiffElo) #nearly perfect
-plotResiduals(resid.intensity, form = RankTable$Group_Size) #heterogenity
+plotResiduals(resid.intensity, form = RankTable$Group_Size) #heterogenity but okay
 plotResiduals(resid.intensity, form = RankTable$Situation) #good
-#TODO adjust heterogneity correct with 1|rowNum?? shouts signularity issue now but hetero gone...
-intensity.model = glmer( AggressBool ~ WinnerElo+ LoserElo + Situation+ Group_Size + 
-                           WinnerElo:Group_Size + Situation:WinnerElo + Group_Size:Situation +
-                           LoserElo:Group_Size + LoserElo:WinnerElo + LoserElo:Situation + (1|rowNum), data = RankTable, family = binomial)
 
-intensity.null = glmer( AggressBool ~ 1+ (1|rowNum), data = RankTable, family = binomial)
+intensity.null = glm( AggressBool ~ 1 , data = RankTable, family = binomial)
 anova(intensity.model, intensity.null, test = "Chisq")
 library(car)
 vif(intensity.model)
 #drop 2-way
-drop1(intensity.model, test = "Chisq") #keeo situation*Groupsize & Winner*Loser
-intensity.model = glmer(AggressBool ~ WinnerElo+ LoserElo + Situation+ Group_Size + 
-                                         Group_Size:Situation + LoserElo:WinnerElo + (1|rowNum), data = RankTable, family = binomial)
+drop1(intensity.model, k = 2) #keeo situation*Groupsize & Winner*Loser
+intensity.model = glm(AggressBool ~ WinnerElo+ LoserElo + Situation+ Group_Size + 
+                                         Group_Size:Situation + LoserElo:WinnerElo, data = RankTable, family = binomial)
 resid.intensity = simulateResiduals(intensity.model)
 plot(resid.intensity)
 plotResiduals(resid.intensity, form = RankTable$DiffElo) #nearly perfect
@@ -496,16 +510,19 @@ parameters(intensity.model, exponentiate = T)
 emmeans(intensity.model, ~ pairwise ~ Group_Size*Situation, type = "response")
 
 plot(allEffects(intensity.model))
-library(sjPlot)
+
 tab_model(intensity.model)
 plot_model(intensity.model, show.value = T)
 
-plot_model(intensity.model, type = "pred", terms = c("WinnerElo[all]", "LoserElo[-2, 0, 2]"))
+p2 = plot_model(intensity.model, type = "pred", terms = c("WinnerElo[all]", "LoserElo[-2, 0, 2]"))
+
+p2 + theme_classic(base_size = 18) + labs(title = "", x = "Elo rating of the winner", y = "Probability for high intensity aggression",
+                                          colour = "Elo rating of \nthe loser")+ geom_line(size = 2)
 
 ##
 #Effect plots
-#Aggression intensity by WinnerElo 
-#TODO: how can the effect be so strong if not visible?
+#Aggression intensity by WinnerElo -> can't be done because part of interaction
+
 RankTable[ ,PredictIntens := predict(intensity.model, type = "response")]
 
 ggplot(data = RankTable, aes(x = WinnerElo, y = PredictIntens, colour = factor(AggressBool)))+
