@@ -203,7 +203,7 @@ RankTable[Code == "Peck"| Code == "Fight", AggressLvl := "physical"]
 RankTable[, AggressBool := ifelse(AggressLvl == "non_physical", 0, 1)]
 
 
-############Sum of Interactions #####################################
+### Sum of Interactions #####################################
 
 #rough overview plot of ratio of interactions by individual
 ggplot(Interact[Group_Size == 'small',],aes(x = rank, y = ratio, colour = Pen)) + 
@@ -266,10 +266,16 @@ InteractSum[, HQ_all := HQ + HQRec]
 InteractSum[, Feed_all := Feed + FeedRec]
 InteractSum[, Normal_all := Normal + NormalRec]
 
+
 InteractWide = melt(InteractSum, id.vars = c("ID","Pen", "Group_Size", "scaleElos"), 
                     measure.vars = c("HQ_all", "Feed_all", "Normal_all"),
                     variable.name = "Situation", 
                     value.name = "Sum")
+
+#include observation time to use as offset in model to account for time observed
+InteractWide[Situation == "HQ_all", Minutes := 40]
+InteractWide[Situation == "Feed_all", Minutes := 30]
+InteractWide[Situation == "Normal_all", Minutes := 30]
 
 ggplot(InteractWide, mapping = aes(x = scaleElos, y =Sum))+#, colour = Pen)) + 
   geom_smooth()+#method = glmer.nb, formula = y ~ splines::bs(x, 3), se = FALSE)+
@@ -280,53 +286,57 @@ ggplot(InteractWide, mapping = aes(x = scaleElos, y =Sum))+#, colour = Pen)) +
   scale_color_manual(values=c(largeCol, smallCol))+
   theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank())
 
+hist(InteractWide$Sum)
 InteractWide[, rowNum := 1:.N]
 #start with max two-way interactions & poly not interacting
-sum.model = glmer(Sum ~ poly(scaleElos,2) + scaleElos*Group_Size+ Situation*Group_Size + Situation*scaleElos+(1|Pen), InteractWide, family = 'poisson')
-resid.df2<- simulateResiduals(sum.model, 1000)
-plot(resid.df2) # overdispersion not good fit -> negative binomial
-sum.model = glmer.nb(Sum ~ poly(scaleElos,2) + scaleElos*Group_Size+ Situation*Group_Size + Situation*scaleElos+(1|Pen), InteractWide)
+#sum.model = glmer(Sum ~ poly(scaleElos,2) + scaleElos*Group_Size+ Situation*Group_Size + Situation*scaleElos+(1|Pen), InteractWide, family = 'poisson')
+#resid.df2<- simulateResiduals(sum.model, 1000)
+#plot(resid.df2) # overdispersion not good fit -> negative binomial
+sum.model = glmer.nb(Sum ~ poly(scaleElos,2) + scaleElos*Group_Size+ Situation*Group_Size + Situation*scaleElos+ offset(log(Minutes))+
+                       (1|Pen), InteractWide)
 resid.df2<- simulateResiduals(sum.model, 1000)
 plot(resid.df2) 
 plotResiduals(resid.df2, form = InteractWide$Group_Size)
 plotResiduals(resid.df2, form = InteractWide$Situation) #problematic?
 plotResiduals(resid.df2, form = InteractWide$scaleElos)
 
-
-sum.model.null = glmer.nb(Sum ~ 1 + (1|Pen), InteractWide) 
+sum.model.null = glmer.nb(Sum ~ 1 + offset(log(Minutes))+(1|Pen), InteractWide) 
 anova(sum.model, sum.model.null, test = "Chisq")
 
 #take out 2-way
 drop1(sum.model, test = "Chisq")
-sum.model.red1 = glmer.nb(Sum ~ poly(scaleElos,2)+Group_Size +Situation+(1|Pen), InteractWide)
+sum.model.red1 = glmer.nb(Sum ~ poly(scaleElos,2)+Group_Size +Situation+offset(log(Minutes))+(1|Pen), InteractWide)
 anova(sum.model.red1, sum.model.null)
 resid.df2<- simulateResiduals(sum.model.red1, 1000)
 plot(resid.df2)
 plotResiduals(resid.df2, form = InteractWide$Group_Size)
-plotResiduals(resid.df2, form = InteractWide$Situation) #problematic?
+plotResiduals(resid.df2, form = InteractWide$Situation) #problematic? no homoscedacity not assumed in negative binomial
 plotResiduals(resid.df2, form = InteractWide$scaleElos)
 
+
 #check if situation makes model better
-sum.model.red2 = glmer.nb(Sum ~ poly(scaleElos,2)+Group_Size+(1|Pen), InteractWide)
+sum.model.red2 = glmer.nb(Sum ~ poly(scaleElos,2)+Group_Size+offset(log(Minutes))+(1|Pen), InteractWide)
 anova(sum.model.red1, sum.model.red2)
-sum.model.red2 = glmer.nb(Sum ~ Situation+Group_Size+(1|Pen), InteractWide)
+sum.model.red2 = glmer.nb(Sum ~ Situation+Group_Size+offset(log(Minutes))+(1|Pen), InteractWide)
 anova(sum.model.red1, sum.model.red2)
 
-
+#check against poisson
+#m3 <- glmer(Sum ~ poly(scaleElos,2)+Group_Size +Situation+offset(log(Minutes))+(1|Pen), family = "poisson", data = InteractWide)
+#pchisq(2 * (logLik(sum.model.red1) - logLik(m3)), df = 1, lower.tail = FALSE)
 
 #results makes sense (see plot) take results as are
-ggplot(InteractWide, aes(x = Situation, y = Sum))+
+ggplot(InteractWide, aes(x = Situation, y = Sum/Minutes))+
   geom_boxplot()+
   facet_grid(.~Group_Size)
 
 summary(sum.model.red1)
 summary(allEffects(sum.model.red1))
-test = emmeans(sum.model.red1, ~ pairwise ~Situation, type = "response")
+test = emmeans(sum.model.red1, ~ pairwise ~Situation, type = "response", offset = log(InteractWide$Minutes))
 plot(test, comparison = TRUE) +theme_bw()
 tab_model(sum.model.red1) #still very high
 plot(predictorEffects(sum.model.red1), lines=list(multiline=TRUE))
 
-ref.grid.Elo = emtrends(sum.model.red1, var = "scaleElos", type = "response")
+ref.grid.Elo = emtrends(sum.model.red1, var = "scaleElos", type = "response", offset = log(InteractWide$Minutes))
 emt <- emtrends(sum.model.red1, ~ degree | scaleElos, "scaleElos", max.degree = 2,
                 at = list(percent = c(9, 13.5, 18)))
 summary(emt, infer = c(TRUE, TRUE))
@@ -345,8 +355,9 @@ largeCol = brewer.pal(n = 8, name = "Blues")[c(4,6,8)]
 smallCol = brewer.pal(n = 8, name = "OrRd")[c(4,6,8)]
 
 #effect plot of Elo and number of interactions split by group
+
 ggplot(data = Interact, mapping = aes(x = scaleElos, y =sum, colour = Pen)) + 
-  geom_smooth(aes(x = scaleElos, y = PredictSum2), se= FALSE)+#method = glmer.nb, formula = y ~ splines::bs(x, 3), se = FALSE)+
+  geom_smooth(aes(x = scaleElos, y = PredictSum), se= FALSE)+#method = glmer.nb, formula = y ~ splines::bs(x, 3), se = FALSE)+
   geom_point(size = 2.5) + 
   labs(x = 'scaled Elo rating', y = 'Number of Interactions')+
   facet_grid(.~ Group_Size) + 
@@ -473,8 +484,6 @@ ggplot(data = RankTable[Group_Size == "large",], mapping = aes(x = WinnerRank, y
   xlim(1,120)+
   ylim(1,120)
 
-
-
 # non-physical set as reference 0
 intensity.model = glmer( AggressBool ~ WinnerElo+ LoserElo + Situation+ Group_Size + 
                            WinnerElo:Group_Size + Situation:WinnerElo + Group_Size:Situation +
@@ -494,7 +503,7 @@ anova(intensity.model, intensity.null, test = "Chisq")
 library(car)
 vif(intensity.model)
 #drop 2-way
-drop1(intensity.model, k = 2) #keeo situation*Groupsize & Winner*Loser
+drop1(intensity.model, k = 2) #keep situation*Groupsize & Winner*Loser
 intensity.model = glm(AggressBool ~ WinnerElo+ LoserElo + Situation+ Group_Size + 
                                          Group_Size:Situation + LoserElo:WinnerElo, data = RankTable, family = binomial)
 resid.intensity = simulateResiduals(intensity.model)
@@ -691,29 +700,34 @@ p2 = ratingE$hierarchy_shape_rand$plot+
 
 ##### Examples of hierarchy plots #######
 
-mean.eloM = rowMeans(ratingE$randElo)
-identitiesM = rownames(ratingE$randElo)
+mean.eloM = rowMeans(ratingF$randElo)
+identitiesM = rownames(ratingF$randElo)
 identitiesM <- identitiesM[order(mean.eloM)]
-CIsM <- apply(ratingE$randElo,1,quantile,c(0.025,0.975),na.rm=TRUE)
+CIsM <- apply(ratingF$randElo,1,quantile,c(0.025,0.975),na.rm=TRUE)
 CIsM <- CIsM[,order(mean.eloM)]
 mean.eloM <- mean.eloM[order(mean.eloM)]
 
-plotTable = data.table(number = 1:20,  
+plotTable1 = data.table(number = 1:20,  
                         ranks = mean.eloM,
                         IDs = identitiesM
 )
+plotTable1[, CIl := CIsM[1,]]
+plotTable1[, CIu := CIsM[2,]]
 
-ggplot(plotTable, aes(x = number, y= ranks))+
-  geom_errorbar(aes(x= number, ymin=CIsM[1,], ymax=CIsM[2,]), width=.1)+
-  geom_point(shape = 21, size = 4.7, colour = "white", fill = "white", stroke = 1)+
+ggplot(plotTable1, aes(x = number, y= ranks))+
+  geom_errorbar(aes(x= number, ymin=CIl, ymax=CIu), width=.1)+
+  geom_point(size = 2)+
+  #geom_point(shape = 21, size = 4.7, colour = "white", fill = "white", stroke = 1)+
   #scale_y_continuous(limits = c(-450, 650))+
-  geom_text(
-    label=plotTable$IDs,
-    size = 4)+
-  labs(x = "Individuals", y="Elo-rating")+
+  #geom_text(
+  #  label=plotTable$IDs,
+  #  size = 4)+
+  labs(x = "Individuals", y="Dominance rank")+
   theme_classic(base_size = 18)+
   theme(axis.text.x=element_blank(),
-        axis.ticks.x=element_blank())  
+        axis.ticks.x=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank())  
 
 
 mean.eloM = rowMeans(ratingB$randElo)
@@ -723,13 +737,15 @@ CIsM <- apply(ratingB$randElo,1,quantile,c(0.025,0.975),na.rm=TRUE)
 CIsM <- CIsM[,order(mean.eloM)]
 mean.eloM <- mean.eloM[order(mean.eloM)]
 
-plotTable = data.table(number = 1:length(mean.eloM),  
+plotTable2 = data.table(number = 1:length(mean.eloM),  
                        ranks = mean.eloM,
                        IDs = identitiesM
 )
+plotTable2[, CIl := CIsM[1,]]
+plotTable2[, CIu := CIsM[2,]]
 
-ggplot(plotTable, aes(x = number, y= ranks))+
-  geom_errorbar(aes(x= number, ymin=CIsM[1,], ymax=CIsM[2,]), width=.1)+
+ggplot(plotTable2, aes(x = number, y= ranks))+
+  geom_errorbar(aes(x= number, ymin=CIl, ymax=CIu), width=.1)+
   geom_point( size = 2)+
   #scale_y_continuous(limits = c(-450, 650))+
   #geom_text(
@@ -741,5 +757,49 @@ ggplot(plotTable, aes(x = number, y= ranks))+
         axis.ticks.x=element_blank()) 
 
 
+plotTable1[, Group_Size := "small"]
+plotTable2[, Group_Size := "large"]
+
+plotTable = rbind(plotTable1, plotTable2)
+plotTable$Group_Size = factor(plotTable$Group_Size, levels=c("small", "large"), labels = c("small group", "large group"))
+BCol = brewer.pal(n = 8, name = "Blues")[6]
+FCol = brewer.pal(n = 8, name = "OrRd")[8]
+
+pp = ggplot(plotTable, aes(x = number, y= ranks, colour = Group_Size) )+
+  geom_errorbar(aes(x= number, ymin=CIl, ymax=CIu), width=.1)+
+  geom_point( size = 2)+
+  #scale_y_continuous(limits = c(-450, 650))+
+  #geom_text(
+  #  label=plotTable$IDs,
+  #  size = 4)+
+  facet_grid( . ~ Group_Size, scales = "free")+
+  scale_color_manual(values=c(FCol, BCol))+
+  labs(x = "Individuals", y="Dominance rank")+
+  scale_y_continuous(breaks=c(-400, 700),
+                     labels=c("low rank", "high rank"))+
+  theme_bw(base_size = 18)+
+  theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank())+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.ticks.y=element_blank(),
+        axis.text.y = element_text(angle=90)) 
+ggsave("HierarchyEx.tiff", pp, "tiff", width = 26, height = 10, units = "cm", dpi = 300)
 
 
+##### plots for poster ####
+plotHelper = Interact
+
+plotHelper$Group_Size = factor(Interact$Group_Size, levels=c("small", "large"), labels = c("small group", "large group"))
+
+p = ggplot(data =plotHelper, mapping = aes(x = scaleElos, y =sum, colour = Pen)) + 
+  geom_smooth(aes(x = scaleElos, y = PredictSum), se= FALSE)+#method = glmer.nb, formula = y ~ splines::bs(x, 3), se = FALSE)+
+  geom_point(size = 2.5) + 
+  labs(x = 'Dominance rank', y = 'Number of interactions')+
+  facet_grid(.~ Group_Size) + 
+  theme_bw(base_size = 18)+
+  scale_color_manual(values=c(largeCol, smallCol))+
+  theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank())+
+  scale_x_continuous(breaks=c(-2, 2.5),
+                   labels=c("low rank", "high rank"))+
+  theme(axis.ticks.x=element_blank()) 
+ggsave("NumberInteractions.tiff", p, "tiff", width = 20, height = 10, units = "cm", dpi = 300)
