@@ -265,10 +265,18 @@ InteractSum[, which(CumSum>0.8)[1]/.N, by = Pen]
 InteractSum[, HQ_all := HQ + HQRec]
 InteractSum[, Feed_all := Feed + FeedRec]
 InteractSum[, Normal_all := Normal + NormalRec]
+InteractSum[, HQ_min := HQ_all/40]
+InteractSum[, Feed_min := Feed_all/30]
+InteractSum[, Normal_min := Normal_all/30]
 
 
 InteractWide = melt(InteractSum, id.vars = c("ID","Pen", "Group_Size", "scaleElos"), 
                     measure.vars = c("HQ_all", "Feed_all", "Normal_all"),
+                    variable.name = "Situation", 
+                    value.name = "Sum")
+
+InteractWideMin = melt(InteractSum, id.vars = c("ID","Pen", "Group_Size", "scaleElos"), 
+                    measure.vars = c("HQ_min", "Feed_min", "Normal_min"),
                     variable.name = "Situation", 
                     value.name = "Sum")
 
@@ -306,7 +314,7 @@ anova(sum.model, sum.model.null, test = "Chisq")
 #take out 2-way
 drop1(sum.model, test = "Chisq")
 sum.model.red1 = glmer.nb(Sum ~ poly(scaleElos,2)+Group_Size +Situation+offset(log(Minutes))+(1|Pen), InteractWide)
-anova(sum.model.red1, sum.model.null)
+anova(sum.model.red1, sum.model.null, test = "Chisq")
 resid.df2<- simulateResiduals(sum.model.red1, 1000)
 plot(resid.df2)
 plotResiduals(resid.df2, form = InteractWide$Group_Size)
@@ -332,6 +340,7 @@ ggplot(InteractWide, aes(x = Situation, y = Sum/Minutes))+
 summary(sum.model.red1)
 summary(allEffects(sum.model.red1))
 test = emmeans(sum.model.red1, ~ pairwise ~Situation, type = "response", offset = log(InteractWide$Minutes))
+confint(test, adjust = "bonferroni", level = 0.95)
 plot(test, comparison = TRUE) +theme_bw()
 tab_model(sum.model.red1) #still very high
 plot(predictorEffects(sum.model.red1), lines=list(multiline=TRUE))
@@ -511,13 +520,21 @@ plot(resid.intensity)
 plotResiduals(resid.intensity, form = RankTable$DiffElo) #nearly perfect
 plotResiduals(resid.intensity, form = RankTable$Group_Size) #heterogenity
 plotResiduals(resid.intensity, form = RankTable$Situation) #good
+intensity.model2 = glm(AggressBool ~ WinnerElo+ LoserElo + Situation+ Group_Size + 
+                        Group_Size:Situation, data = RankTable, family = binomial)
 
-anova(intensity.model, intensity.null, test = "Chisq")
+
+anova(intensity.null,intensity.model, test = "Chisq")
+anova(intensity.model, intensity.model2, test = "Chisq")
+
 
 summary(intensity.model)
 parameters(intensity.model, exponentiate = T)
-emmeans(intensity.model, ~ pairwise ~ Group_Size*Situation, type = "response")
-
+group_sit = emmeans(intensity.model, ~ pairwise ~ Group_Size*Situation, type = "response")
+emmeans(intensity.model, ~ pairwise ~ WinnerElo*LoserElo, type = "response")
+emmeans(intensity.model, ~ WinnerElo, 
+        at = list(WinnerElo = c(min(RankTable$WinnerElo),mean(RankTable$WinnerElo),max(RankTable$WinnerElo))), type= "response")
+confint(group_sit, adjust = "bonferroni", level = 0.95)
 plot(allEffects(intensity.model))
 
 tab_model(intensity.model)
