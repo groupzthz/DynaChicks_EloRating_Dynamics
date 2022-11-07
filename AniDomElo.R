@@ -345,27 +345,24 @@ plot(test, comparison = TRUE) +theme_bw()
 tab_model(sum.model.red1) #still very high
 plot(predictorEffects(sum.model.red1), lines=list(multiline=TRUE))
 
-ref.grid.Elo = emtrends(sum.model.red1, var = "scaleElos", type = "response", offset = log(InteractWide$Minutes))
-emt <- emtrends(sum.model.red1, ~ degree | scaleElos, "scaleElos", max.degree = 2,
-                at = list(percent = c(9, 13.5, 18)))
+#WHAT DOES THIS DO? not helpful I think
+emt <- emtrends(sum.model.red1, ~ degree | scaleElos, var = "scaleElos", 
+                max.degree = 2, offset = log(InteractWide$Minutes),
+                type = "response", at = list(scaleElos = c(min(Interact$scaleElos), 0, max(Interact$scaleElos))))
 summary(emt, infer = c(TRUE, TRUE))
 
-#change refgrid to keep all Elo values to predict value for each individual
-gridFull = ref_grid(sum.model.red1, cov.keep = "scaleElos")
-
-predictAtElo = summary(emmeans(gridFull, "scaleElos", type = "response"))
-
-
 InteractWide[, PredictSum := (predict(sum.model.red1, type = "response"))]
-Interact[order(Group_Size, scaleElos), PredictSum2 := predictAtElo$response]
-
+plotSums = dcast(InteractWide, ID +Pen + scaleElos + Group_Size ~ Situation, value.var = c("PredictSum", "Sum"))
+plotSums[, Sum_HQ_all := (Sum_HQ_all/40)*30]
+plotSums[, Sum := Sum_HQ_all + Sum_Feed_all + Sum_Normal_all]
+plotSums[, PredictSum := PredictSum_HQ_all + PredictSum_Feed_all + PredictSum_Normal_all]
 
 largeCol = brewer.pal(n = 8, name = "Blues")[c(4,6,8)]
 smallCol = brewer.pal(n = 8, name = "OrRd")[c(4,6,8)]
 
 #effect plot of Elo and number of interactions split by group
 
-ggplot(data = Interact, mapping = aes(x = scaleElos, y =sum, colour = Pen)) + 
+ggplot(data = plotSums, mapping = aes(x = scaleElos, y =Sum, colour = Pen)) + 
   geom_smooth(aes(x = scaleElos, y = PredictSum), se= FALSE)+#method = glmer.nb, formula = y ~ splines::bs(x, 3), se = FALSE)+
   geom_point(size = 2.5) + 
   labs(x = 'scaled Elo rating', y = 'Number of Interactions')+
@@ -387,19 +384,32 @@ ggplot(data = InteractWide, mapping = aes(x = scaleElos, y =Sum, colour = Pen)) 
 
 
 #plot Effects of Situation
-plotData <- as.data.table(emmeans(sum.model.red1, ~ pairwise ~Situation, type = "response")$emmeans)
+plotData <- as.data.table(emmeans(sum.model.red1, ~ pairwise ~Situation, type = "response", offset = log(InteractWide$Minutes))$emmeans)
+plotData2 = InteractWide
+plotData2[Situation == "HQ_all", Sum := (Sum/40)*30]
 
 ggplot(plotData, aes(x = Situation, y = response))+
-  geom_pointrange(data = InteractWide[, .(median = median(Sum), 
+  #geom_pointrange(data = plotData2[, .(median = median(Sum), 
+  #                                   q1 = quantile(Sum, 0.25),
+  #                                   q2 = quantile(Sum, 0.75)),by = Situation], 
+  #           aes(x = Situation, y= median, ymin = q1, ymax = q2), size = 1, colour = "grey")+
+  geom_jitter(data = plotData2, aes(x = Situation, y= Sum, colour = Pen), width=0.15)+
+  geom_pointrange(aes(ymin = asymp.LCL, ymax = asymp.UCL), size = 1, colour = "black", shape=23, fill="yellow")+
+  scale_color_manual(values=c(largeCol, smallCol))+
+  labs(x = "Situation", y= "Number of interactions by individuals")+
+  scale_x_discrete(labels=c("Grape", "Feed", "Normal"))+
+  theme_classic(base_size = 18)
+
+ggplot(plotData, aes(x = Situation, y = response))+
+  geom_pointrange(data = plotData2[, .(median = median(Sum), 
                                      q1 = quantile(Sum, 0.25),
                                      q2 = quantile(Sum, 0.75)),by = Situation], 
              aes(x = Situation, y= median, ymin = q1, ymax = q2), size = 1, colour = "grey")+
   geom_pointrange(aes(ymin = asymp.LCL, ymax = asymp.UCL), size = 1)+
-  
+  scale_color_manual(values=c(largeCol, smallCol))+
   labs(x = "Situation", y= "Predicted number of interactions by individuals")+
-  scale_x_discrete(labels=c("HQ", "Feed", "Normal"))+
+  scale_x_discrete(labels=c("Grape", "Feed", "Normal"))+
   theme_classic(base_size = 18)
-
 
 #### Patterns of aggression ############
 
@@ -413,11 +423,11 @@ diagnF$strategy
 
 #strategy plots
 dom_plot_strategy(diagnA$focus_pos, diagnA$blur, show_data_ci = T)
-dom_plot_strategy(diagnB$focus_pos, diagnA$blur, show_data_ci = T)
-dom_plot_strategy(diagnC$focus_pos, diagnA$blur, show_data_ci = T)
-dom_plot_strategy(diagnD$focus_pos, diagnA$blur, show_data_ci = T)
-dom_plot_strategy(diagnE$focus_pos, diagnA$blur, show_data_ci = T)
-dom_plot_strategy(diagnF$focus_pos, diagnA$blur, show_data_ci = T)
+dom_plot_strategy(diagnB$focus_pos, diagnB$blur, show_data_ci = T)
+dom_plot_strategy(diagnC$focus_pos, diagnC$blur, show_data_ci = T)
+dom_plot_strategy(diagnD$focus_pos, diagnD$blur, show_data_ci = T)
+dom_plot_strategy(diagnE$focus_pos, diagnE$blur, show_data_ci = T)
+dom_plot_strategy(diagnF$focus_pos, diagnF$blur, show_data_ci = T)
 
 
 # Plot for Dynamics of interactions by rank (small)
@@ -465,7 +475,7 @@ ggplot(data = RankTable[Pen == "E",], mapping = aes(x = WinnerRank, y =LoserRank
   ylim(0.5,20.5)
 
 
-########### AGGRESSION Intensity #################
+########### Aggression Intensity #################
 
 #facet by intensity
 ggplot(data = RankTable[Group_Size == "small",], mapping = aes(x = WinnerRank, y =LoserRank)) + 
@@ -558,9 +568,9 @@ ggplot(data = RankTable, aes(x = WinnerElo, y = PredictIntens, colour = factor(A
 
 ggplot(data = Interact, aes(x = scaleElos))+
   geom_point(aes(y = physAggr), size = 2, colour = "red")+
-  geom_smooth(aes(x = scaleElos, y = physAggr),colour = "red")+
+  geom_smooth(aes(y = physAggr),colour = "red")+
   geom_point(aes(y = nonphysAggr), size = 2, colour = "blue")+
-  geom_smooth(aes(x = scaleElos, y = nonphysAggr),colour = "blue")+
+  geom_smooth(aes(y = nonphysAggr),colour = "blue")+
     #facet_grid(.~Pen)+
   theme_bw(base_size = 18)
 
@@ -589,59 +599,60 @@ contrast = as.data.table(emmeans(intensity.model, ~ pairwise ~ Group_Size*Situat
 
 
 library(ggsignif)
-p = ggplot(plotData, aes(x = Group_Size, y = prob))+
+ggplot(plotData, aes(x = Group_Size, y = prob))+
   geom_pointrange(aes(shape = Situation, ymin = asymp.LCL, ymax = asymp.UCL), position = position_dodge(width = 0.75), size = 1.5)+
   #geom_point(data = observedProb, aes(shape = Situation), position = position_jitterdodge(jitter.width = 0.3) , size = 3, colour = "grey")+
   labs(x = "Group size", y= "Predicted probability for high intensity aggression")+
   ylim(0.1,1)+
+  scale_shape_discrete(labels=c('Feeder', 'Grape', 'Normal'))+
   theme_classic(base_size = 18)
   
-p +   geom_signif( #large Feeder vs. large HQ
-  annotation = "**",#formatC(contrast$p.value[2], digits = 1),
-  y_position = 0.65, xmin = 0.75, xmax = 0.99,
-  tip_length = c(0.2, 0.1),
-  textsize = 8,
-  size = 1
-) +
-  
-  geom_signif( #large HQ vs. large Normal
-    annotation = "***",#formatC(contrast$p.value[11], digits = 1),
-    y_position = 0.65, xmin = 1.01, xmax = 1.25,
-    tip_length = c(0.1, 0.3),
-    textsize = 8,
-    size = 1
-  )+
-  
-  geom_signif( #large Feeder vs. large Normal
-    annotation = "0.06",#formatC(contrast$p.value[11], digits = 1),
-    y_position = 0.75, xmin = 0.75, xmax = 1.25,
-    tip_length = c(0.1, 0.1),
-    textsize = 5,
-    size = 1
-  )+
-geom_signif( #small Feeder vs. small HQ
-  annotation = "***",#formatC(contrast$p.value[7], digits = 1),
-  y_position = 0.8, xmin = 1.75, xmax = 1.99,
-  tip_length = c(0.2, 0.04),
-  textsize = 8,
-  size = 1
-) +
-  
-  geom_signif( #small HQ vs. small Normal
-    annotation = "**",#formatC(contrast$p.value[14], digits = 1),
-    y_position = 0.8, xmin = 2.01, xmax = 2.25,
-    tip_length = c(0.04, 0.2),
-    textsize = 8,
-    size = 1
-  )+
-  
-  geom_signif( #small HQ vs. large HQ
-    annotation = "*",#formatC(contrast$p.value[10], digits = 1),
-    y_position = 0.95, xmin = 1, xmax = 2,
-    tip_length = c(0.25, 0.1),
-    textsize = 8,
-    size = 1
-  )
+# p +   geom_signif( #large Feeder vs. large HQ
+#   annotation = "**",#formatC(contrast$p.value[2], digits = 1),
+#   y_position = 0.65, xmin = 0.75, xmax = 0.99,
+#   tip_length = c(0.2, 0.1),
+#   textsize = 8,
+#   size = 1
+# ) +
+#   
+#   geom_signif( #large HQ vs. large Normal
+#     annotation = "***",#formatC(contrast$p.value[11], digits = 1),
+#     y_position = 0.65, xmin = 1.01, xmax = 1.25,
+#     tip_length = c(0.1, 0.3),
+#     textsize = 8,
+#     size = 1
+#   )+
+#   
+#   geom_signif( #large Feeder vs. large Normal
+#     annotation = "0.06",#formatC(contrast$p.value[11], digits = 1),
+#     y_position = 0.75, xmin = 0.75, xmax = 1.25,
+#     tip_length = c(0.1, 0.1),
+#     textsize = 5,
+#     size = 1
+#   )+
+# geom_signif( #small Feeder vs. small HQ
+#   annotation = "***",#formatC(contrast$p.value[7], digits = 1),
+#   y_position = 0.8, xmin = 1.75, xmax = 1.99,
+#   tip_length = c(0.2, 0.04),
+#   textsize = 8,
+#   size = 1
+# ) +
+#   
+#   geom_signif( #small HQ vs. small Normal
+#     annotation = "**",#formatC(contrast$p.value[14], digits = 1),
+#     y_position = 0.8, xmin = 2.01, xmax = 2.25,
+#     tip_length = c(0.04, 0.2),
+#     textsize = 8,
+#     size = 1
+#   )+
+#   
+#   geom_signif( #small HQ vs. large HQ
+#     annotation = "*",#formatC(contrast$p.value[10], digits = 1),
+#     y_position = 0.95, xmin = 1, xmax = 2,
+#     tip_length = c(0.25, 0.1),
+#     textsize = 8,
+#     size = 1
+#   )
 
 
 ####################### Individual contacts data ######################################
