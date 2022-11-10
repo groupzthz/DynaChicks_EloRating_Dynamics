@@ -24,13 +24,16 @@ library(effects) #model effects visualisation
 library(RColorBrewer) # color for plotting
 library(EloSteepness) # for steepness measure
 library(sjPlot)
+library(nlstools)
 source('helper_functions_Elo.R')
 set.seed(42)
 
 ##### Loading and preparing Data ###########
-Individ <- fread("Individuals.csv",header = TRUE, sep = ";")
-dataMature <- fread("MatureInteractionsFull.csv",header = TRUE, sep = ";")
-
+#Individ <- fread("Individuals.csv",header = TRUE, sep = ";")
+library(readr)
+Individ <- fread("//nas-vetsuisse/VETSUISSE/Benutzer/yg18q990/Project_ChickenStress/Individuals.csv")
+#dataMature <- fread("MatureInteractionsFull.csv",header = TRUE, sep = ";")
+dataMature <- fread("//nas-vetsuisse/VETSUISSE/Benutzer/yg18q990/Project_ChickenStress/MatureInteractionsFull.csv",header=T,sep=";")
 #check Data
 str(dataMature)
 length(unique(dataMature$Date)) == 4
@@ -269,7 +272,6 @@ InteractSum[, HQ_min := HQ_all/40]
 InteractSum[, Feed_min := Feed_all/30]
 InteractSum[, Normal_min := Normal_all/30]
 
-
 InteractWide = melt(InteractSum, id.vars = c("ID","Pen", "Group_Size", "scaleElos"), 
                     measure.vars = c("HQ_all", "Feed_all", "Normal_all"),
                     variable.name = "Situation", 
@@ -330,7 +332,8 @@ anova(sum.model.red1, sum.model.red2)
 
 #check against poisson
 #m3 <- glmer(Sum ~ poly(scaleElos,2)+Group_Size +Situation+offset(log(Minutes))+(1|Pen), family = "poisson", data = InteractWide)
-#pchisq(2 * (logLik(sum.model.red1) - logLik(m3)), df = 1, lower.tail = FALSE)
+#pchisq(2 * (logLik(sum.model.red1) - logLik(m3)), df = 1)
+# based on this output: poisson seems to be the better fit to the model
 
 #results makes sense (see plot) take results as are
 ggplot(InteractWide, aes(x = Situation, y = Sum/Minutes))+
@@ -338,7 +341,11 @@ ggplot(InteractWide, aes(x = Situation, y = Sum/Minutes))+
   facet_grid(.~Group_Size)
 
 summary(sum.model.red1)
-summary(allEffects(sum.model.red1))
+sum.model.red2 = glmer.nb(Sum ~ poly(scaleElos,1)+Group_Size+offset(log(Minutes))+(1|Pen), InteractWide)
+sum.model.red3 = glmer.nb(Sum ~ poly(scaleElos,2)+Group_Size+offset(log(Minutes))+(1|Pen), InteractWide)
+anova(sum.model.red2,sum.model.red3)
+
+summary(allEffects(sum.model.red2))
 test = emmeans(sum.model.red1, ~ pairwise ~Situation, type = "response", offset = log(InteractWide$Minutes))
 confint(test, adjust = "bonferroni", level = 0.95)
 plot(test, comparison = TRUE) +theme_bw()
@@ -346,7 +353,7 @@ tab_model(sum.model.red1) #still very high
 plot(predictorEffects(sum.model.red1), lines=list(multiline=TRUE))
 
 #WHAT DOES THIS DO? not helpful I think
-emt <- emtrends(sum.model.red1, ~ degree | scaleElos, var = "scaleElos", 
+emt <- emtrends(sum.model.red2, ~ degree | scaleElos, var = "scaleElos", 
                 max.degree = 2, offset = log(InteractWide$Minutes),
                 type = "response", at = list(scaleElos = c(min(Interact$scaleElos), 0, max(Interact$scaleElos))))
 summary(emt, infer = c(TRUE, TRUE))
@@ -531,14 +538,31 @@ plotResiduals(resid.intensity, form = RankTable$DiffElo) #nearly perfect
 plotResiduals(resid.intensity, form = RankTable$Group_Size) #heterogenity
 plotResiduals(resid.intensity, form = RankTable$Situation) #good
 intensity.model2 = glm(AggressBool ~ WinnerElo+ LoserElo + Situation+ Group_Size + 
-                        Group_Size:Situation, data = RankTable, family = binomial)
-
-
-anova(intensity.null,intensity.model, test = "Chisq")
-anova(intensity.model, intensity.model2, test = "Chisq")
+                        Group_Size:Situation, data = RankTable, family = binomial())
 
 
 summary(intensity.model)
+pchisq(intensity.model$deviance, df=intensity.model$df.residual, lower.tail=FALSE)
+library(ResourceSelection)
+hoslem.test(intensity.model$y, fitted(intensity.model), g=7)
+
+#This gives p=0.15, indicating no evidence of poor fit.
+exp(0.05686)
+require(rms)
+summary(RankTable$LoserElo)
+summary(RankTable$WinnerElo)
+
+summary(intensity.model, LoserElo=0)  # gives IQR odds ratio for WinnerElo
+
+summary(intensity.model, WinnerElo=c(1,3), LoserElo=0)  # OR for WinnerElo=1 vs. WinnerElo=3
+
+exp(0.21744+0.05686*LoserElo)
+
+anova(intensity.null,intensity.model, test = "Chisq")
+anova(intensity.model, intensity.model2, test = "Chisq")
+min(RankTable$LoserElo)
+emtrends(intensity.model, pairwise ~ LoserElo, var="WinnerElo", at=list(Group_Size="large", LoserElo=c( -2.88449,2.728267)))
+         
 parameters(intensity.model, exponentiate = T)
 group_sit = emmeans(intensity.model, ~ pairwise ~ Group_Size*Situation, type = "response")
 emmeans(intensity.model, ~ pairwise ~ WinnerElo*LoserElo, type = "response")
