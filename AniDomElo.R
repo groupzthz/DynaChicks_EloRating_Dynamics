@@ -25,6 +25,7 @@ library(RColorBrewer) # color for plotting
 library(EloSteepness) # for steepness measure
 library(sjPlot)
 library(nlstools)
+library(elo)
 source('helper_functions_Elo.R')
 set.seed(42)
 
@@ -106,6 +107,7 @@ printCalculations(ratingC)
 printCalculations(ratingD)
 printCalculations(ratingE)
 printCalculations(ratingF)
+
 
 ##################### Bayesian Steepness ##########################################################
 #Steepness
@@ -288,7 +290,7 @@ InteractWide[Situation == "Feed_all", Minutes := 30]
 InteractWide[Situation == "Normal_all", Minutes := 30]
 
 ggplot(InteractWide, mapping = aes(x = scaleElos, y =Sum))+#, colour = Pen)) + 
-  geom_smooth()+#method = glmer.nb, formula = y ~ splines::bs(x, 3), se = FALSE)+
+  geom_smooth(method=lm)+#method = glmer.nb, formula = y ~ splines::bs(x, 3), se = FALSE)+
   geom_point(size = 2.5) + 
   labs(x = 'scaled Elo rating', y = 'Number of Interactions')+
   #facet_grid(Situation~ Group_Size) + 
@@ -315,7 +317,43 @@ anova(sum.model, sum.model.null, test = "Chisq")
 
 #take out 2-way
 drop1(sum.model, test = "Chisq")
-sum.model.red1 = glmer.nb(Sum ~ poly(scaleElos,2)+Group_Size +Situation+offset(log(Minutes))+(1|Pen), InteractWide)
+sum.model.red1 = glmer.nb(Sum ~ poly(scaleElos,1)+Group_Size +Situation+offset(log(Minutes))+(1|Pen), InteractWide)
+summary(sum.model.red1)
+min(predict(sum.model.red1))
+max(predict(sum.model.red1))
+
+
+drop1(sum.model, test = "Chisq")
+InteractWide$scaleElos2 <- InteractWide$scaleElos^2
+sum.model.redplay = glmer.nb(Sum ~ scaleElos+scaleElos2+Group_Size +
+                               Situation+offset(log(Minutes))+(1|Pen), InteractWide)
+summary(sum.model.redplay)
+
+
+sum.model.redplay = glm.nb(Sum ~ scaleElos+scaleElos2+Group_Size +
+                               Situation+offset(log(Minutes)), InteractWide)
+summary(sum.model.redplay)
+
+
+newdata=expand.grid(scaleElos=c(-3,-2,-1,0,1,2,3),
+                    scaleElos2=c(-3,-2,-1,0,1,2,3)^2,
+                    Group_Size=levels(InteractWide$Group_Size),
+                    Situation=levels(InteractWide$Situation),
+                    Minutes=33.333,
+                    Pen=levels(InteractWide$Pen))
+
+
+newdata$pred <- predict(sum.model.redplay,newdata,type="response")
+
+aggregate(newdata$pred,
+          list(newdata$Group_Size,newdata$Situation,as.factor(newdata$scaleElos)),
+          mean)
+
+
+
+hist(InteractWide$scaleElos)
+
+anova(sum.model.red1,test="Chisq")
 anova(sum.model.red1, sum.model.null, test = "Chisq")
 resid.df2<- simulateResiduals(sum.model.red1, 1000)
 plot(resid.df2)
