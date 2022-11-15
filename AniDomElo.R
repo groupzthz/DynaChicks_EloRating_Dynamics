@@ -325,12 +325,12 @@ max(predict(sum.model.red1))
 
 drop1(sum.model, test = "Chisq")
 InteractWide$scaleElos2 <- InteractWide$scaleElos^2
-sum.model.redplay = glmer.nb(Sum ~ scaleElos+scaleElos2+Group_Size +
+sum.model.redplay = glmer.nb(Sum ~ scaleElos+I(scaleElos2)+Group_Size +
                                Situation+offset(log(Minutes))+(1|Pen), InteractWide)
 summary(sum.model.redplay)
 
 
-sum.model.redplay = glm.nb(Sum ~ scaleElos+scaleElos2+Group_Size +
+sum.model.redplay = glm.nb(Sum ~ scaleElos+I(scaleElos2)+Group_Size +
                                Situation+offset(log(Minutes)), InteractWide)
 summary(sum.model.redplay)
 
