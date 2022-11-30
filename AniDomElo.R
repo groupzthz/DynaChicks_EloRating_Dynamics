@@ -30,11 +30,11 @@ source('helper_functions_Elo.R')
 set.seed(42)
 
 ##### Loading and preparing Data ###########
-#Individ <- fread("Individuals.csv",header = TRUE, sep = ";")
-library(readr)
-Individ <- fread("//nas-vetsuisse/VETSUISSE/Benutzer/yg18q990/Project_ChickenStress/Individuals.csv")
-#dataMature <- fread("MatureInteractionsFull.csv",header = TRUE, sep = ";")
-dataMature <- fread("//nas-vetsuisse/VETSUISSE/Benutzer/yg18q990/Project_ChickenStress/MatureInteractionsFull.csv",header=T,sep=";")
+Individ <- fread("Individuals.csv",header = TRUE, sep = ";")
+#library(readr)
+#Individ <- fread("//nas-vetsuisse/VETSUISSE/Benutzer/yg18q990/Project_ChickenStress/Individuals.csv")
+dataMature <- fread("MatureInteractionsFull.csv",header = TRUE, sep = ";")
+#dataMature <- fread("//nas-vetsuisse/VETSUISSE/Benutzer/yg18q990/Project_ChickenStress/MatureInteractionsFull.csv",header=T,sep=";")
 #check Data
 str(dataMature)
 length(unique(dataMature$Date)) == 4
@@ -137,6 +137,11 @@ steepF = elo_steepness_from_sequence(winner = PenF$Winner,
                                      refresh = 0,
                                      cores = 2)
 
+summary(steepA)
+plot_steepness(steepD)
+plot_scores(steepD)
+plot_steepness_regression(steepD)
+D_scores <- as.data.table(scores(steepD, quantiles = c(0.055, 0.945)))
 
 #######################################################################################
 
@@ -210,6 +215,11 @@ RankTable[, AggressBool := ifelse(AggressLvl == "non_physical", 0, 1)]
 
 ### Sum of Interactions #####################################
 
+#Descriptives
+descript = Interact[, .(Sum = sum(sum)/2, N = .N), by = Group_Size]
+descript[, rate := (Sum/N/100)*60]
+Interact[, summary(sum), by = Group_Size]
+
 #rough overview plot of ratio of interactions by individual
 ggplot(Interact[Group_Size == 'small',],aes(x = rank, y = ratio, colour = Pen)) + 
   geom_point()+
@@ -218,45 +228,6 @@ ggplot(Interact[Group_Size == 'large',],aes(x = rank, y = ratio, colour = Pen)) 
   geom_point()+
   geom_smooth(se = F)
 
-#old model
-#model for the number of interactions by Elo
-# sum.model = glmer(sum ~ poly(scaleElos,2)*Group_Size + (1|Pen), Interact, family = 'poisson')
-# resid.df2<- simulateResiduals(sum.model, 1000)
-# plot(resid.df2) # overdispersion not good fit
-# plotResiduals(resid.df2, form = Interact$Condition)
-# plotResiduals(resid.df2, form = Interact$scaleElos)
-# #try negative binomial fit to compensate overdispersal
-# sum.model = glmer.nb(sum ~ poly(scaleElos,2)*Group_Size + (1|Pen), Interact)
-# resid.df2<- simulateResiduals(sum.model, 1000)
-# plot(resid.df2) #looks great
-# plotResiduals(resid.df2, form = Interact$Condition)
-# plotResiduals(resid.df2, form = Interact$scaleElos)
-# 
-# sum.model.null = glmer.nb(sum ~ 1 + (1|Pen), Interact) 
-# anova(sum.model, sum.model.null, test = "Chisq")
-# 
-# #take out 2-way
-# drop1(sum.model, test = "Chisq")
-# sum.model.red = glmer.nb(sum ~ poly(scaleElos,2) + Group_Size + (1|Pen), Interact)
-# resid.df2<- simulateResiduals(sum.model.red, 1000)
-# plot(resid.df2)
-# plotResiduals(resid.df2, form = Interact$Condition)
-# plotResiduals(resid.df2, form = Interact$scaleElos)
-# 
-# summary(sum.model.red)
-# summary(emtrends(sum.model.red, ~ scaleElos, "scaleElos", max.degree = 2, type = "response"), infer = c(T,T))
-# summary(allEffects(sum.model.red))
-#calculate in percent from hand
-# round((negbinom$family$linkinv(estimate)-1)*100)
-# round((negbinom$family$linkinv(estimate-sd)-1)*100)
-# round((negbinom$family$linkinv(estimate+sd)-1)*100)
-#https://stats.stackexchange.com/questions/365623/how-to-report-negative-binomial-regression-results-from-r
-
-#Interact[, PredictSum := (predict(sum.model.red, type = "response"))]
-#how to get CI for plot?? se.fit in predicted doesn't work for glmer
-#Interact[, LCISum := exp(predict(sum.model.red)- 1.96 * se.fit)]
-#Interact[, UCISum := exp(predict(sum.model.red))]
-#Yamenah will check if possible, might try without
 
 
 #Who accounts for how much percentage of Interactions
@@ -289,6 +260,8 @@ InteractWide[Situation == "HQ_all", Minutes := 40]
 InteractWide[Situation == "Feed_all", Minutes := 30]
 InteractWide[Situation == "Normal_all", Minutes := 30]
 
+InteractWide[, .(mean(Sum), sd(Sum)), by = Situation]
+
 ggplot(InteractWide, mapping = aes(x = scaleElos, y =Sum))+#, colour = Pen)) + 
   geom_smooth(method=lm)+#method = glmer.nb, formula = y ~ splines::bs(x, 3), se = FALSE)+
   geom_point(size = 2.5) + 
@@ -304,7 +277,8 @@ InteractWide[, rowNum := 1:.N]
 #sum.model = glmer(Sum ~ poly(scaleElos,2) + scaleElos*Group_Size+ Situation*Group_Size + Situation*scaleElos+(1|Pen), InteractWide, family = 'poisson')
 #resid.df2<- simulateResiduals(sum.model, 1000)
 #plot(resid.df2) # overdispersion not good fit -> negative binomial
-sum.model = glmer.nb(Sum ~ poly(scaleElos,2) + scaleElos*Group_Size+ Situation*Group_Size + Situation*scaleElos+ offset(log(Minutes))+
+# ploy(raw= T) otherwise weird estimates with raw = F 
+sum.model = glmer.nb(Sum ~ poly(scaleElos,2, raw = TRUE) + scaleElos*Group_Size+ Situation*Group_Size + Situation*scaleElos+ offset(log(Minutes))+
                        (1|Pen), InteractWide)
 resid.df2<- simulateResiduals(sum.model, 1000)
 plot(resid.df2) 
@@ -317,24 +291,19 @@ anova(sum.model, sum.model.null, test = "Chisq")
 
 #take out 2-way
 drop1(sum.model, test = "Chisq")
-sum.model.red1 = glmer.nb(Sum ~ poly(scaleElos,1)+Group_Size +Situation+offset(log(Minutes))+(1|Pen), InteractWide)
+sum.model.red1 = glmer.nb(Sum ~ poly(scaleElos,2, raw = TRUE)+Group_Size +Situation+offset(log(Minutes))+(1|Pen), InteractWide)
 summary(sum.model.red1)
 min(predict(sum.model.red1))
 max(predict(sum.model.red1))
+anova(sum.model.red1, sum.model.null, test = "Chisq")
+resid.df2<- simulateResiduals(sum.model.red1, 1000)
+plot(resid.df2)
+plotResiduals(resid.df2, form = InteractWide$Group_Size)
+plotResiduals(resid.df2, form = InteractWide$Situation) #problematic? no homoscedacity not assumed in negative binomial
+plotResiduals(resid.df2, form = InteractWide$scaleElos)
+parameters(sum.model.red1, exp = TRUE)
 
-
-drop1(sum.model, test = "Chisq")
-InteractWide$scaleElos2 <- InteractWide$scaleElos^2
-sum.model.redplay = glmer.nb(Sum ~ scaleElos+I(scaleElos2)+Group_Size +
-                               Situation+offset(log(Minutes))+(1|Pen), InteractWide)
-summary(sum.model.redplay)
-
-
-sum.model.redplay = glm.nb(Sum ~ scaleElos+I(scaleElos2)+Group_Size +
-                               Situation+offset(log(Minutes)), InteractWide)
-summary(sum.model.redplay)
-
-
+#YG insert
 newdata=expand.grid(scaleElos=c(-3,-2,-1,0,1,2,3),
                     scaleElos2=c(-3,-2,-1,0,1,2,3)^2,
                     Group_Size=levels(InteractWide$Group_Size),
@@ -342,25 +311,12 @@ newdata=expand.grid(scaleElos=c(-3,-2,-1,0,1,2,3),
                     Minutes=33.333,
                     Pen=levels(InteractWide$Pen))
 
-
 newdata$pred <- predict(sum.model.redplay,newdata,type="response")
-
 aggregate(newdata$pred,
           list(newdata$Group_Size,newdata$Situation,as.factor(newdata$scaleElos)),
           mean)
 
-
-
 hist(InteractWide$scaleElos)
-
-anova(sum.model.red1,test="Chisq")
-anova(sum.model.red1, sum.model.null, test = "Chisq")
-resid.df2<- simulateResiduals(sum.model.red1, 1000)
-plot(resid.df2)
-plotResiduals(resid.df2, form = InteractWide$Group_Size)
-plotResiduals(resid.df2, form = InteractWide$Situation) #problematic? no homoscedacity not assumed in negative binomial
-plotResiduals(resid.df2, form = InteractWide$scaleElos)
-
 
 #check if situation makes model better
 sum.model.red2 = glmer.nb(Sum ~ poly(scaleElos,2)+Group_Size+offset(log(Minutes))+(1|Pen), InteractWide)
@@ -391,10 +347,14 @@ tab_model(sum.model.red1) #still very high
 plot(predictorEffects(sum.model.red1), lines=list(multiline=TRUE))
 
 #WHAT DOES THIS DO? not helpful I think
-emt <- emtrends(sum.model.red2, ~ degree | scaleElos, var = "scaleElos", 
+emt <- emtrends(sum.model.red1, ~ degree | scaleElos, var = "scaleElos", 
                 max.degree = 2, offset = log(InteractWide$Minutes),
-                type = "response", at = list(scaleElos = c(min(Interact$scaleElos), 0, max(Interact$scaleElos))))
+                type = "response", at = list(scaleElos = c(min(InteractWide$scaleElos), 0, max(InteractWide$scaleElos))))
 summary(emt, infer = c(TRUE, TRUE))
+# MIN MAX and MEAN estimates
+emmeans(sum.model.red1, ~ scaleElos, var = "scaleElos", offset = log(InteractWide$Minutes),
+                type = "response", at = list(scaleElos = c(min(InteractWide$scaleElos), mean(InteractWide$scaleElos), max(InteractWide$scaleElos))))
+
 
 InteractWide[, PredictSum := (predict(sum.model.red1, type = "response"))]
 plotSums = dcast(InteractWide, ID +Pen + scaleElos + Group_Size ~ Situation, value.var = c("PredictSum", "Sum"))
@@ -548,61 +508,76 @@ ggplot(data = RankTable[Group_Size == "large",], mapping = aes(x = WinnerRank, y
   xlim(1,120)+
   ylim(1,120)
 
+
+#create dyad identifier
+#TODO: do they need to be unique as in winners and losers or rather dyad unique?
+RankTable[, Dyad := paste(Pen, Winner, Loser)]
+intensity.model = glmer( AggressBool ~ WinnerElo+ LoserElo + Situation+ Group_Size + 
+                           WinnerElo:Group_Size + Situation:WinnerElo + Group_Size:Situation +
+                           LoserElo:Group_Size + LoserElo:WinnerElo + LoserElo:Situation + (1|Dyad/Pen), data = RankTable, family = binomial)
+#failed to converge -> Pen barely any variation -> try without
 # non-physical set as reference 0
 intensity.model = glmer( AggressBool ~ WinnerElo+ LoserElo + Situation+ Group_Size + 
                            WinnerElo:Group_Size + Situation:WinnerElo + Group_Size:Situation +
-                           LoserElo:Group_Size + LoserElo:WinnerElo + LoserElo:Situation + (1|Pen), data = RankTable, family = binomial)
-#singularity
-intensity.model = glm( AggressBool ~ WinnerElo+ LoserElo + Situation+ Group_Size + 
-                           WinnerElo:Group_Size + Situation:WinnerElo + Group_Size:Situation +
-                           LoserElo:Group_Size + LoserElo:WinnerElo + LoserElo:Situation, data = RankTable, family = binomial)
+                           LoserElo:Group_Size + LoserElo:WinnerElo + LoserElo:Situation + (1|Dyad), data = RankTable, family = binomial)
+
 resid.intensity = simulateResiduals(intensity.model)
 plot(resid.intensity)
 plotResiduals(resid.intensity, form = RankTable$DiffElo) #nearly perfect
-plotResiduals(resid.intensity, form = RankTable$Group_Size) #heterogenity but okay
+plotResiduals(resid.intensity, form = RankTable$Group_Size) #good
 plotResiduals(resid.intensity, form = RankTable$Situation) #good
 
-intensity.null = glm( AggressBool ~ 1 , data = RankTable, family = binomial)
+intensity.null = glmer( AggressBool ~ 1 + (1|Dyad), data = RankTable, family = binomial)
 anova(intensity.model, intensity.null, test = "Chisq")
 library(car)
 vif(intensity.model)
 #drop 2-way
-drop1(intensity.model, k = 2) #keep situation*Groupsize & Winner*Loser
-intensity.model = glm(AggressBool ~ WinnerElo+ LoserElo + Situation+ Group_Size + 
-                                         Group_Size:Situation + LoserElo:WinnerElo, data = RankTable, family = binomial)
+drop1(intensity.model, test = "Chisq")#, k = 2) #keep situation*Groupsize & Winner*Loser
+
+RankTable[, reLSituation := factor(Situation, levels = c("HQ", "Feeder", "Normal"))]
+RankTable[, reLGroup_Size := factor(Group_Size, levels = c("small", "large"))]
+
+intensity.model = glmer(AggressBool ~ WinnerElo+ LoserElo + reLSituation+ reLGroup_Size + 
+                                         reLGroup_Size:reLSituation + LoserElo:WinnerElo + (1|Dyad), 
+                        data = RankTable, family = binomial, glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 100000)))
 resid.intensity = simulateResiduals(intensity.model)
 plot(resid.intensity)
 plotResiduals(resid.intensity, form = RankTable$DiffElo) #nearly perfect
-plotResiduals(resid.intensity, form = RankTable$Group_Size) #heterogenity
+plotResiduals(resid.intensity, form = RankTable$Group_Size) #good
 plotResiduals(resid.intensity, form = RankTable$Situation) #good
 intensity.model2 = glm(AggressBool ~ WinnerElo+ LoserElo + Situation+ Group_Size + 
                         Group_Size:Situation, data = RankTable, family = binomial())
 
 
 summary(intensity.model)
+
+# TODO: WHAT IS THIS SUPPOSED TO DO?
 pchisq(intensity.model$deviance, df=intensity.model$df.residual, lower.tail=FALSE)
 library(ResourceSelection)
 hoslem.test(intensity.model$y, fitted(intensity.model), g=7)
-
 #This gives p=0.15, indicating no evidence of poor fit.
 exp(0.05686)
 require(rms)
 summary(RankTable$LoserElo)
 summary(RankTable$WinnerElo)
-
 summary(intensity.model, LoserElo=0)  # gives IQR odds ratio for WinnerElo
-
 summary(intensity.model, WinnerElo=c(1,3), LoserElo=0)  # OR for WinnerElo=1 vs. WinnerElo=3
-
 exp(0.21744+0.05686*LoserElo)
 
 anova(intensity.null,intensity.model, test = "Chisq")
 anova(intensity.model, intensity.model2, test = "Chisq")
 min(RankTable$LoserElo)
-emtrends(intensity.model, pairwise ~ LoserElo, var="WinnerElo", at=list(Group_Size="large", LoserElo=c( -2.88449,2.728267)))
+
+#aggression intensity by winnerelo fixed at min mean or max loserelo
+winBeta = summary(emtrends(intensity.model, ~ LoserElo, var="WinnerElo", 
+                   at=list(LoserElo=c( min(RankTable$LoserElo),mean(RankTable$LoserElo), max(RankTable$LoserElo)))))
+winBeta$WinnerElo.trend = exp(winBeta$WinnerElo.trend)
+winBeta$asymp.LCL = exp(winBeta$asymp.LCL)
+winBeta$asymp.UCL = exp(winBeta$asymp.UCL)
+winBeta
          
-parameters(intensity.model, exponentiate = T)
-group_sit = emmeans(intensity.model, ~ pairwise ~ Group_Size*Situation, type = "response")
+parameters(intensity.model, exponentiate = TRUE)
+group_sit = emmeans(intensity.model, ~ pairwise ~ reLGroup_Size*reLSituation, type = "response")
 emmeans(intensity.model, ~ pairwise ~ WinnerElo*LoserElo, type = "response")
 emmeans(intensity.model, ~ WinnerElo, 
         at = list(WinnerElo = c(min(RankTable$WinnerElo),mean(RankTable$WinnerElo),max(RankTable$WinnerElo))), type= "response")
@@ -612,7 +587,7 @@ plot(allEffects(intensity.model))
 tab_model(intensity.model)
 plot_model(intensity.model, show.value = T)
 
-p2 = plot_model(intensity.model, type = "pred", terms = c("WinnerElo[all]", "LoserElo[-2, 0, 2]"))
+p2 = plot_model(intensity.model, type = "pred", terms = c("WinnerElo[all]", "LoserElo[-2.882, -0.441, 2.733]"))
 
 p2 + theme_classic(base_size = 18) + labs(title = "", x = "Elo rating of the winner", y = "Probability for high intensity aggression",
                                           colour = "Elo rating of \nthe loser")+ geom_line(size = 2)
