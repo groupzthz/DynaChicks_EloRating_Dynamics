@@ -2,6 +2,8 @@ getwd()
 
 #clear workspace
 rm(list = ls())
+
+
 #install.packages("EloRating")
 #install_github("gobbios/EloRating", build_vignettes = TRUE)
 library(aniDom) # randomised Elo-rating
