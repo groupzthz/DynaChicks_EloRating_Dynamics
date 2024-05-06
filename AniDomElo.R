@@ -4,8 +4,6 @@ getwd()
 rm(list = ls())
 
 
-#install.packages("EloRating")
-#install_github("gobbios/EloRating", build_vignettes = TRUE)
 library(aniDom) # randomised Elo-rating
 library(EloRating) # original Elo rating
 library(domstruc) # focus and position (who interacts with whom)
@@ -14,11 +12,9 @@ library(data.table) # data.frame better
 library(ggplot2) # plotting
 library(lme4) # mixed models
 library(multcomp) # posthoc analysis
-#library(ggfortify)
-#library(useful)
 library(DHARMa) # model diagnistics
 library(moments) # normal asumptions
-library(MuMIn) # model comparison
+library(MuMIn) # model comparison and pseudo R²
 library(irr) # ICC calculations
 library(parameters) # model parameters
 library(emmeans) #model means
@@ -28,15 +24,16 @@ library(EloSteepness) # for steepness measure
 library(sjPlot)
 library(nlstools)
 library(elo)
+library(ggpubr)#plot combination
+library(binom) #confidence intervall for binomial sample
 source('helper_functions_Elo.R')
+source('plot_utils.R')
 set.seed(42)
 
-##### Loading and preparing Data ###########
+#### Loading and preparing Data ###########
 Individ <- fread("Individuals.csv",header = TRUE, sep = ";")
-#library(readr)
-#Individ <- fread("//nas-vetsuisse/VETSUISSE/Benutzer/yg18q990/Project_ChickenStress/Individuals.csv")
 dataMature <- fread("MatureInteractionsFull.csv",header = TRUE, sep = ";")
-#dataMature <- fread("//nas-vetsuisse/VETSUISSE/Benutzer/yg18q990/Project_ChickenStress/MatureInteractionsFull.csv",header=T,sep=";")
+
 #check Data
 str(dataMature)
 length(unique(dataMature$Date)) == 4
@@ -51,8 +48,6 @@ dataMature = dataMature[order(Date, Pen, VideoTime),]
 #check that data is complete
 dataMature[, .(minTime = min(VideoTime), maxTime = max(VideoTime)), by = .(Date,Pen)]
 
-#check order of data
-
 #split into pens
 PenAt = dataMature[Pen == "A", c(1, 3, 4,5, 7)]
 PenBt = dataMature[Pen == "B", c(1, 3, 4,5, 7)]
@@ -62,7 +57,6 @@ PenEt = dataMature[Pen == "E", c(1, 3, 4,5, 7)]
 PenFt = dataMature[Pen == "F", c(1, 3, 4,5, 7)]
 
 #check entered Individuals
-
 PenA = PenAt[(Winner %in% unique(Individ$ID[Individ$Pen == "A"]))& 
                  (Loser %in% unique(Individ$ID[Individ$Pen == "A"])),]
 PenB = PenBt[(Winner %in% unique(Individ$ID[Individ$Pen == "B"]))& 
@@ -79,14 +73,40 @@ PenF = PenFt[(Winner %in% unique(Individ$ID[Individ$Pen == "F"]))&
 #exclusion of double tagged animal during Mature
 PenA = PenA[Winner != "ZA" & Loser != "ZA"]
 
-
+#clean workspace
 rm(dataMature, 
    PenAt, PenBt, PenCt, PenDt, PenEt, PenFt)
 
-################ Diagnostics ###############################################################
+#### Diganostics, transitivity ###############################################################
 
 # Dataset analytics:
+#number of observations by resource condition
+PenA[, .N, by = Condition]
+PenB[, .N, by = Condition]
+PenC[, .N, by = Condition]
+PenD[, .N, by = Condition]
+PenE[, .N, by = Condition]
+PenF[, .N, by = Condition]
 
+#number of observations by observed interaction type
+PenA[, .N, by = Code]
+PenB[, .N, by = Code]
+PenC[, .N, by = Code]
+PenD[, .N, by = Code]
+PenE[, .N, by = Code]
+PenF[, .N, by = Code]
+
+
+# were all inidviduals observed?
+# total number of interactions
+# ratio of interactions per bird 
+# proportion of unknown pair-relationships
+# expected proportion of known relationships + CI under Poisson distribution 
+# actual number of unknown relationships
+# triangle transitivity
+# focus and position + CIs
+# simulated data of downward heuristic reference
+# estimated pattern of aggression
 diagnA = dataset_diagnostics(PenA, Individ$ID[Individ$Pen == 'A'])
 diagnB = dataset_diagnostics(PenB, Individ$ID[Individ$Pen == 'B'])
 diagnC = dataset_diagnostics(PenC, Individ$ID[Individ$Pen == 'C'])
@@ -94,8 +114,8 @@ diagnD = dataset_diagnostics(PenD, Individ$ID[Individ$Pen == 'D'])
 diagnE = dataset_diagnostics(PenE, Individ$ID[Individ$Pen == 'E'])
 diagnF = dataset_diagnostics(PenF, Individ$ID[Individ$Pen == 'F'])
 
-##################### Elo rating ################################################################
-# RATING
+#### Elo rating calculation ################################################################
+
 ratingA = elo_analysis(PenA, Individ$ID[Individ$Pen == 'A']) 
 ratingB = elo_analysis(PenB, Individ$ID[Individ$Pen == 'B']) 
 ratingC = elo_analysis(PenC, Individ$ID[Individ$Pen == 'C']) 
@@ -111,7 +131,8 @@ printCalculations(ratingE)
 printCalculations(ratingF)
 
 
-##################### Bayesian Steepness ##########################################################
+#### Bayesian Steepness ##########################################################
+
 #Steepness
 steepA = elo_steepness_from_sequence(winner = PenA$Winner,
                                       loser = PenA$Loser,
@@ -139,31 +160,14 @@ steepF = elo_steepness_from_sequence(winner = PenF$Winner,
                                      refresh = 0,
                                      cores = 2)
 
+#example of one output
 summary(steepA)
 plot_steepness(steepD)
 plot_scores(steepD)
 plot_steepness_regression(steepD)
 D_scores <- as.data.table(scores(steepD, quantiles = c(0.055, 0.945)))
 
-#######################################################################################
-
-####### DATASET DESCRIPTIONS ################
-
-PenA[, .N, by = Condition]
-PenB[, .N, by = Condition]
-PenC[, .N, by = Condition]
-PenD[, .N, by = Condition]
-PenE[, .N, by = Condition]
-PenF[, .N, by = Condition]
-
-PenA[, .N, by = Code]
-PenB[, .N, by = Code]
-PenC[, .N, by = Code]
-PenD[, .N, by = Code]
-PenE[, .N, by = Code]
-PenF[, .N, by = Code]
-
-###### DATA Tables to work with #################
+#### Data tables for analyses #################
 
 # Overview of data of all individuals 
 Interact = rbind(ratingA$Individuals, ratingB$Individuals, ratingC$Individuals, ratingD$Individuals,
@@ -185,7 +189,6 @@ Interact[, ratioIntens := physAggr/(physAggr+nonphysAggr)]
 #fwrite(Interact, "IndividualData.csv", sep = ";")
 
 Interact = Interact[!is.na(elos),]
-
 Interact[, rowNum := 1:.N]
 
 ####
@@ -215,12 +218,14 @@ RankTable[Code == "Peck"| Code == "Fight", AggressLvl := "physical"]
 RankTable[, AggressBool := ifelse(AggressLvl == "non_physical", 0, 1)]
 
 
-### Sum of Interactions #####################################
+
+#### Sum of Interactions #####################################
 
 #Descriptives
+#divide number of interactions to not count them twice
 descript = Interact[, .(Sum = sum(sum)/2, N = .N), by = Group_Size]
 descript[, rate := (Sum/N/100)*60]
-Interact[, summary(sum), by = Group_Size]
+#Interact[, summary(sum), by = Group_Size]
 
 #rough overview plot of ratio of interactions by individual
 ggplot(Interact[Group_Size == 'small',],aes(x = rank, y = ratio, colour = Pen)) + 
@@ -231,15 +236,13 @@ ggplot(Interact[Group_Size == 'large',],aes(x = rank, y = ratio, colour = Pen)) 
   geom_smooth(se = F)
 
 
-
 #Who accounts for how much percentage of Interactions
 InteractSum = Interact[order(Pen, rank),]
 InteractSum[, CumSum := cumsum(sum)/(sum(sum)*0.5), by = Pen]
 InteractSum[, which(CumSum>0.8)[1]/.N, by = Pen]
 
-#including Condition in model?
 
-#ERST BERECHNEN WIE DIE SUMME ALLER HQ ETC IS
+#First calculate sums within conditions and add offset  
 InteractSum[, HQ_all := HQ + HQRec]
 InteractSum[, Feed_all := Feed + FeedRec]
 InteractSum[, Normal_all := Normal + NormalRec]
@@ -247,11 +250,11 @@ InteractSum[, HQ_min := HQ_all/40]
 InteractSum[, Feed_min := Feed_all/30]
 InteractSum[, Normal_min := Normal_all/30]
 
+#change to wide format
 InteractWide = melt(InteractSum, id.vars = c("ID","Pen", "Group_Size", "scaleElos"), 
                     measure.vars = c("HQ_all", "Feed_all", "Normal_all"),
                     variable.name = "Situation", 
                     value.name = "Sum")
-
 InteractWideMin = melt(InteractSum, id.vars = c("ID","Pen", "Group_Size", "scaleElos"), 
                     measure.vars = c("HQ_min", "Feed_min", "Normal_min"),
                     variable.name = "Situation", 
@@ -262,10 +265,14 @@ InteractWide[Situation == "HQ_all", Minutes := 40]
 InteractWide[Situation == "Feed_all", Minutes := 30]
 InteractWide[Situation == "Normal_all", Minutes := 30]
 
-InteractWide[, .(mean(Sum), sd(Sum)), by = Situation]
+#desriptive for condition
+InteractWideMin[, .(Mean = mean(Sum*60/2), SD = sd(Sum*60/2)), by = c("Situation")]
+ggplot(InteractWide, aes(x = Situation, y = Sum/Minutes))+
+  geom_boxplot()+
+  facet_grid(.~Group_Size)
 
+#look at data distribution
 ggplot(InteractWide, mapping = aes(x = scaleElos, y =Sum))+#, colour = Pen)) + 
-  geom_smooth(method=lm)+#method = glmer.nb, formula = y ~ splines::bs(x, 3), se = FALSE)+
   geom_point(size = 2.5) + 
   labs(x = 'scaled Elo rating', y = 'Number of Interactions')+
   #facet_grid(Situation~ Group_Size) + 
@@ -273,202 +280,376 @@ ggplot(InteractWide, mapping = aes(x = scaleElos, y =Sum))+#, colour = Pen)) +
   scale_color_manual(values=c(largeCol, smallCol))+
   theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank())
 
-hist(InteractWide$Sum)
-InteractWide[, rowNum := 1:.N]
-#start with max two-way interactions & poly not interacting
-#sum.model = glmer(Sum ~ poly(scaleElos,2) + scaleElos*Group_Size+ Situation*Group_Size + Situation*scaleElos+(1|Pen), InteractWide, family = 'poisson')
-#resid.df2<- simulateResiduals(sum.model, 1000)
-#plot(resid.df2) # overdispersion not good fit -> negative binomial
-# ploy(raw= T) otherwise weird estimates with raw = F 
+#look at data distribution
+hist(InteractWide$Sum) #-> poisson model
+
+##### statistical model ####
+# poly(raw= T) otherwise impossible estimates with raw = F 
+sum.model = glmer(Sum ~ poly(scaleElos,2, raw = TRUE) + scaleElos*Group_Size+ Situation*Group_Size + Situation*scaleElos+ offset(log(Minutes))+
+                       (1|Pen), InteractWide, family = "poisson")
+resid.df2<- simulateResiduals(sum.model, 1000)
+plot(resid.df2) #overdispersal!! -> negative binomial model necessary
+
 sum.model = glmer.nb(Sum ~ poly(scaleElos,2, raw = TRUE) + scaleElos*Group_Size+ Situation*Group_Size + Situation*scaleElos+ offset(log(Minutes))+
                        (1|Pen), InteractWide)
 resid.df2<- simulateResiduals(sum.model, 1000)
 plot(resid.df2) 
-plotResiduals(resid.df2, form = InteractWide$Group_Size)
-plotResiduals(resid.df2, form = InteractWide$Situation) #problematic?
-plotResiduals(resid.df2, form = InteractWide$scaleElos)
+plotResiduals(resid.df2, form = InteractWide$Group_Size) #good
+plotResiduals(resid.df2, form = InteractWide$Situation) #problematic? no homoscedacity not assumed in negative binomial
+plotResiduals(resid.df2, form = InteractWide$scaleElos) #good
 
-sum.model.null = glmer.nb(Sum ~ 1 + offset(log(Minutes))+(1|Pen), InteractWide) 
-anova(sum.model, sum.model.null, test = "Chisq")
+sum.model.null = glmer.nb(Sum ~ 1 +(1|Pen), InteractWide) 
+anova(sum.model, sum.model.null) #better than intercept only
 
+#simplify model
 #take out 2-way
-drop1(sum.model, test = "Chisq")
+drop1(sum.model) # only removing polynomial effect would make the model much worse
+
+#reduced final model
 sum.model.red1 = glmer.nb(Sum ~ poly(scaleElos,2, raw = TRUE)+Group_Size +Situation+offset(log(Minutes))+(1|Pen), InteractWide)
-summary(sum.model.red1)
-min(predict(sum.model.red1))
-max(predict(sum.model.red1))
-anova(sum.model.red1, sum.model.null, test = "Chisq")
 resid.df2<- simulateResiduals(sum.model.red1, 1000)
 plot(resid.df2)
-plotResiduals(resid.df2, form = InteractWide$Group_Size)
+plotResiduals(resid.df2, form = InteractWide$Group_Size) #good
 plotResiduals(resid.df2, form = InteractWide$Situation) #problematic? no homoscedacity not assumed in negative binomial
-plotResiduals(resid.df2, form = InteractWide$scaleElos)
-parameters(sum.model.red1, exp = TRUE)
+plotResiduals(resid.df2, form = InteractWide$scaleElos) # good
+AIC(sum.model.red1, sum.model.null)
 
-#YG insert
-newdata=expand.grid(scaleElos=c(-3,-2,-1,0,1,2,3),
-                    scaleElos2=c(-3,-2,-1,0,1,2,3)^2,
-                    Group_Size=levels(InteractWide$Group_Size),
-                    Situation=levels(InteractWide$Situation),
-                    Minutes=33.333,
-                    Pen=levels(InteractWide$Pen))
-
-newdata$pred <- predict(sum.model.redplay,newdata,type="response")
-aggregate(newdata$pred,
-          list(newdata$Group_Size,newdata$Situation,as.factor(newdata$scaleElos)),
-          mean)
-
-hist(InteractWide$scaleElos)
-
-#check if situation makes model better
-sum.model.red2 = glmer.nb(Sum ~ poly(scaleElos,2)+Group_Size+offset(log(Minutes))+(1|Pen), InteractWide)
-anova(sum.model.red1, sum.model.red2)
-sum.model.red2 = glmer.nb(Sum ~ Situation+Group_Size+offset(log(Minutes))+(1|Pen), InteractWide)
-anova(sum.model.red1, sum.model.red2)
-
-#check against poisson
-#m3 <- glmer(Sum ~ poly(scaleElos,2)+Group_Size +Situation+offset(log(Minutes))+(1|Pen), family = "poisson", data = InteractWide)
-#pchisq(2 * (logLik(sum.model.red1) - logLik(m3)), df = 1)
-# based on this output: poisson seems to be the better fit to the model
-
-#results makes sense (see plot) take results as are
-ggplot(InteractWide, aes(x = Situation, y = Sum/Minutes))+
-  geom_boxplot()+
-  facet_grid(.~Group_Size)
-
+#model estimate
 summary(sum.model.red1)
-sum.model.red2 = glmer.nb(Sum ~ poly(scaleElos,1)+Group_Size+offset(log(Minutes))+(1|Pen), InteractWide)
-sum.model.red3 = glmer.nb(Sum ~ poly(scaleElos,2)+Group_Size+offset(log(Minutes))+(1|Pen), InteractWide)
-anova(sum.model.red2,sum.model.red3)
-
-summary(allEffects(sum.model.red2))
-test = emmeans(sum.model.red1, ~ pairwise ~Situation, type = "response", offset = log(InteractWide$Minutes))
-confint(test, adjust = "bonferroni", level = 0.95)
-plot(test, comparison = TRUE) +theme_bw()
-tab_model(sum.model.red1) #still very high
+parameters(sum.model.red1, exp = TRUE)
+tab_model(sum.model.red1)
 plot(predictorEffects(sum.model.red1), lines=list(multiline=TRUE))
+summary(allEffects(sum.model.red2))
 
-#WHAT DOES THIS DO? not helpful I think
-emt <- emtrends(sum.model.red1, ~ degree | scaleElos, var = "scaleElos", 
-                max.degree = 2, offset = log(InteractWide$Minutes),
-                type = "response", at = list(scaleElos = c(min(InteractWide$scaleElos), 0, max(InteractWide$scaleElos))))
-summary(emt, infer = c(TRUE, TRUE))
-# MIN MAX and MEAN estimates
-emmeans(sum.model.red1, ~ scaleElos, var = "scaleElos", offset = log(InteractWide$Minutes),
-                type = "response", at = list(scaleElos = c(min(InteractWide$scaleElos), mean(InteractWide$scaleElos), max(InteractWide$scaleElos))))
+#estimate variance explained
+r.squaredGLMM(sum.model.red1, sum.model.null)
 
+#Post-hoc comparison of conditions
+postHocCond = emmeans(sum.model.red1, ~ pairwise ~Situation, 
+                      type = "response", offset = log(InteractWide$Minutes))
+confint(postHocCond, adjust = "bonferroni", level = 0.95)
 
+##### plots #####
+
+#save model estimates
 InteractWide[, PredictSum := (predict(sum.model.red1, type = "response"))]
+
 plotSums = dcast(InteractWide, ID +Pen + scaleElos + Group_Size ~ Situation, value.var = c("PredictSum", "Sum"))
 plotSums[, Sum_HQ_all := (Sum_HQ_all/40)*30]
 plotSums[, Sum := Sum_HQ_all + Sum_Feed_all + Sum_Normal_all]
 plotSums[, PredictSum := PredictSum_HQ_all + PredictSum_Feed_all + PredictSum_Normal_all]
 
+#colors for large and small groups
 largeCol = brewer.pal(n = 8, name = "Blues")[c(4,6,8)]
 smallCol = brewer.pal(n = 8, name = "OrRd")[c(4,6,8)]
 
+
 #effect plot of Elo and number of interactions split by group
-
-ggplot(data = plotSums, mapping = aes(x = scaleElos, y =Sum, colour = Pen)) + 
+eloPlot = ggplot(data = plotSums, mapping = aes(x = scaleElos, y =Sum, colour = Pen)) + 
   geom_smooth(aes(x = scaleElos, y = PredictSum), se= FALSE)+#method = glmer.nb, formula = y ~ splines::bs(x, 3), se = FALSE)+
   geom_point(size = 2.5) + 
-  labs(x = 'scaled Elo rating', y = 'Number of Interactions')+
-  facet_grid(.~ Group_Size) + 
-  theme_bw(base_size = 18)+
-  scale_color_manual(values=c(largeCol, smallCol))+
-  theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank())
-
-#effect plot of Elo and number of interactions split by Situation
-ggplot(data = InteractWide, mapping = aes(x = scaleElos, y =Sum, colour = Pen)) + 
-  geom_smooth(aes(x = scaleElos, y = PredictSum), se= FALSE)+#method = glmer.nb, formula = y ~ splines::bs(x, 3), se = FALSE)+
-  geom_point(size = 2.5) + 
-  labs(x = 'scaled Elo rating', y = 'Number of Interactions')+
-  facet_grid(Group_Size~ Situation) + 
+  labs(x = 'Scaled Elo rating', y = 'Number of interactions')+
+  facet_grid(.~ Group_Size,labeller = labeller(Group_Size = c("large" = "large groups", "small" = "small groups"))) + 
   theme_bw(base_size = 18)+
   scale_color_manual(values=c(largeCol, smallCol))+
   theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank())
 
 
-
-#plot Effects of Situation
-plotData <- as.data.table(emmeans(sum.model.red1, ~ pairwise ~Situation, type = "response", offset = log(InteractWide$Minutes))$emmeans)
+#plot effects of the condition
+plotData <- as.data.table(emmeans(sum.model.red1, ~ pairwise ~Situation*Group_Size, type = "response", offset = log(InteractWide$Minutes))$emmeans)
 plotData2 = InteractWide
 plotData2[Situation == "HQ_all", Sum := (Sum/40)*30]
 
+#not used in paper
 ggplot(plotData, aes(x = Situation, y = response))+
-  #geom_pointrange(data = plotData2[, .(median = median(Sum), 
-  #                                   q1 = quantile(Sum, 0.25),
-  #                                   q2 = quantile(Sum, 0.75)),by = Situation], 
-  #           aes(x = Situation, y= median, ymin = q1, ymax = q2), size = 1, colour = "grey")+
-  geom_jitter(data = plotData2, aes(x = Situation, y= Sum, colour = Pen), width=0.15)+
-  geom_pointrange(aes(ymin = asymp.LCL, ymax = asymp.UCL), size = 1, colour = "black", shape=23, fill="yellow")+
+  geom_jitter(data = plotData2, aes(x = Situation, y= Sum, colour = Pen), width=0.27)+
+  geom_pointrange(aes(ymin = asymp.LCL, ymax = asymp.UCL, shape = "model estimate"), 
+                  size = 1, linewidth = 1.5, colour = "black", 
+                  fill="yellow")+
   scale_color_manual(values=c(largeCol, smallCol))+
-  labs(x = "Situation", y= "Number of interactions by individuals")+
-  scale_x_discrete(labels=c("Grape", "Feed", "Normal"))+
-  theme_classic(base_size = 18)
+  facet_grid(.~ Group_Size,labeller = labeller(Group_Size = c("large" = "large groups", "small" = "small groups"))) + 
+  labs(x = "Resource condition", y= "Number of interactions")+
+  scale_shape_manual(name = NULL, values = c("model estimate" = 23))+
+  guides(colour = guide_legend(order = 1),
+         shape = guide_legend(order = 2))+
+  scale_x_discrete(labels=c("HQ", "FC", "CON"))+
+  theme_bw(base_size = 18)+
+  theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank(), legend.position = "top")
 
-ggplot(plotData, aes(x = Situation, y = response))+
-  geom_pointrange(data = plotData2[, .(median = median(Sum), 
+plotData <- as.data.table(emmeans(sum.model.red1, ~ pairwise ~Situation, type = "response", offset = log(InteractWide$Minutes))$emmeans)
+
+
+#plot used in paper
+condPlot = 
+  ggplot(plotData, aes(x = Situation, y = response))+
+  geom_pointrange(data = plotData2[, .(mean = mean(Sum), 
                                      q1 = quantile(Sum, 0.25),
                                      q2 = quantile(Sum, 0.75)),by = Situation], 
-             aes(x = Situation, y= median, ymin = q1, ymax = q2), size = 1, colour = "grey")+
-  geom_pointrange(aes(ymin = asymp.LCL, ymax = asymp.UCL), size = 1)+
-  scale_color_manual(values=c(largeCol, smallCol))+
-  labs(x = "Situation", y= "Predicted number of interactions by individuals")+
-  scale_x_discrete(labels=c("Grape", "Feed", "Normal"))+
+             aes(x = Situation, y= mean, ymin = q1, ymax = q2, 
+                 colour = "observed data"),
+             size = 1,linewidth = 1.5,
+             position = position_nudge(x = -0.025))+
+  geom_pointrange(aes(ymin = asymp.LCL, ymax = asymp.UCL,
+                      colour = "model estimates"), 
+                  size = 1, linewidth = 1.5,
+                  position = position_nudge(x = 0.025))+
+  scale_color_manual(name = NULL, values=c("observed data" = "grey", "model estimates" = "black"))+
+  labs(x = "Resource Condition", y= "Number of interactions")+
+  scale_x_discrete(labels=c("HQ", "FC", "CON"))+
   theme_classic(base_size = 18)
+
+
+legend <- get_legend(condPlot)
+
+figInteractions = ggarrange(eloPlot,condPlot, ncol = 2, labels = c("a)", "b)"), 
+                             font.label=list(color="black",size=16),widths = c(1,0.7), legend = "top", legend.grob = legend)
+
+ggsave(path = "plots", "Test.tiff", figInteractions, "tiff", width = 38, height= 15, units = "cm", dpi = 300)
+
+
+#### Aggression Intensity #################
+
+
+#create dyad identifier
+RankTable[, Dyad := paste(sort(c(Winner, Loser)), collapse = " "), by = 1:nrow(test)]
+RankTable[, Dyad := paste(Pen, Dyad)]
+
+
+##### statistical model #####
+
+#to change level orders
+RankTable[, Situation := factor(Situation, levels = c("HQ", "Feeder", "Normal"))]
+RankTable[, Group_Size := factor(Group_Size, levels = c("small", "large"))]
+
+# non-physical set as reference 0
+#binomial model for intensity of aggression
+intensity.model = glmer( AggressBool ~ WinnerElo+ LoserElo + Situation+ Group_Size + 
+                           WinnerElo:Group_Size + Situation:WinnerElo + Group_Size:Situation +
+                           LoserElo:Group_Size + LoserElo:WinnerElo + LoserElo:Situation + (1|Dyad/Pen), data = RankTable, family = binomial)
+#failed to converge -> Pen barely any variation -> try without
+intensity.model = glmer( AggressBool ~ WinnerElo+ LoserElo + Situation+ Group_Size + 
+                           WinnerElo:Group_Size + Situation:WinnerElo + Group_Size:Situation +
+                           LoserElo:Group_Size + LoserElo:WinnerElo + LoserElo:Situation + (1|Dyad), 
+                         data = RankTable, family = binomial, 
+                         glmerControl(optimizer = "bobyqa",optCtrl = list(maxfun = 100000)))
+
+resid.intensity = simulateResiduals(intensity.model)
+plot(resid.intensity)
+plotResiduals(resid.intensity, form = RankTable$DiffElo) #nearly perfect
+plotResiduals(resid.intensity, form = RankTable$Group_Size) #good
+plotResiduals(resid.intensity, form = RankTable$Situation) #good
+
+intensity.null = glmer( AggressBool ~ 1 + (1|Dyad), data = RankTable, family = binomial)
+anova(intensity.model, intensity.null) #better than null model
+
+#reduce complexity: test 2-way interactions
+drop1(intensity.model) #keep situation*Groupsize & Winner*Loser
+
+
+intensity.model = glmer(AggressBool ~ WinnerElo+ LoserElo + Situation+ Group_Size + 
+                                         Group_Size:Situation + LoserElo:WinnerElo + (1|Dyad), 
+                        data = RankTable, family = binomial, 
+                        glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 100000)))
+resid.intensity = simulateResiduals(intensity.model)
+plot(resid.intensity)
+plotResiduals(resid.intensity, form = RankTable$DiffElo) #nearly perfect
+plotResiduals(resid.intensity, form = RankTable$Group_Size) #good
+plotResiduals(resid.intensity, form = RankTable$Situation) #good
+
+anova(intensity.model, intensity.null) #better than null model
+
+#model estimates
+summary(intensity.model)
+parameters(intensity.model, exponentiate = TRUE)
+tab_model(intensity.model)
+plot(predictorEffects(intensity.model), lines=list(multiline=TRUE))
+plot(allEffects(intensity.model))
+plot_model(intensity.model, show.value = T)
+
+#explained variance
+r.squaredGLMM(intensity.model, intensity.null)
+
+#estimated means and post hoc testing
+
+#aggression intensity by winnerelo fixed at min, mean, or max loserelo
+emmeans(intensity.model, ~ WinnerElo, 
+        at = list(WinnerElo = c(min(RankTable$WinnerElo),mean(RankTable$WinnerElo),max(RankTable$WinnerElo))), type= "response")
+
+winBeta = summary(emtrends(intensity.model, ~ LoserElo, var="WinnerElo", 
+                   at=list(LoserElo=c( min(RankTable$LoserElo),
+                                       mean(RankTable$LoserElo), 
+                                       max(RankTable$LoserElo)))), adjust = "bonferroni", level = 0.95)
+winBeta$WinnerElo.trend = exp(winBeta$WinnerElo.trend)
+winBeta$asymp.LCL = exp(winBeta$asymp.LCL)
+winBeta$asymp.UCL = exp(winBeta$asymp.UCL)
+winBeta
+
+
+#aggression intensity by group size and situation    
+group_sit = emmeans(intensity.model, ~ pairwise ~ Group_Size*Situation, type = "response")
+confint(group_sit, adjust = "bonferroni", level = 0.95)
+
+
+##### plots ####
+
+#Aggression intensity by WinnerElo*LoserElo
+
+RankTable[,PredictIntens := predict(intensity.model, type = "response")]
+#change level order
+RankTable[, Situation := factor(Situation, levels = c("Feeder", "HQ","Normal"))]
+
+#get values to split the Elo ratings in three equal parts
+split = Interact[, quantile(unique(scaleElos), probs = c(1/4, 3/4))]
+
+RankTable[, LoserSplit := "low Elo"]
+RankTable[LoserElo > split[1], LoserSplit := "mid Elo"]
+RankTable[LoserElo > split[2], LoserSplit := "high Elo"]
+
+
+intensPlot1 = 
+  ggplot(RankTable, aes(x = WinnerElo, y = AggressBool, colour = Pen))+
+  geom_jitter(height = 0.02, alpha = 0.5)+
+  #geom_smooth(aes(colour = Ratio,group = as.factor(HenID)),se = F)+
+  geom_smooth(data = RankTable[LoserSplit == "low Elo", .(meanIntens = mean(PredictIntens, na.rm = TRUE)), by = WinnerElo], 
+              aes(y = meanIntens, linetype = "<25%"), linewidth = 1.2, se = F, colour = "black")+
+  geom_smooth(data = RankTable[LoserSplit == "mid Elo", .(meanIntens = mean(PredictIntens, na.rm = TRUE)), by = WinnerElo], 
+              aes(y = meanIntens, linetype = "average"), linewidth = 1.2, se = F, colour = "black")+
+  geom_smooth(data = RankTable[LoserSplit == "high Elo", .(meanIntens = mean(PredictIntens, na.rm = TRUE)), by = WinnerElo], 
+              aes(y = meanIntens, linetype = ">75%"), linewidth = 1.2, se = F, colour = "black")+
+  theme_classic(base_size = 18)+
+  labs(x = 'Elo rating of Winners', y = "Odds for high intensity aggression")+
+  #scale_x_continuous(breaks = plotbreaks, #which(!duplicated(varOfInterest[,WoA]))
+  #                   labels = c("25", "35", "45" , "55"))+
+  scale_color_manual(values=c(largeCol, smallCol))+
+  scale_linetype_manual(name = "Losers Elo \nrating range", values = c("<25%" = "dashed", "average" = "solid", ">75%" = "dotted")) +
+  guides(color = guide_legend(order = 1), linetype = guide_legend(order = 2)) +
+  theme(panel.background = element_rect(color = "black", size = 1))
+
+
+#Aggression intensity by Situation and Group Size
+
+plotData <- as.data.table(emmeans(intensity.model, ~ pairwise ~Situation*Group_Size, type = "response")$emmeans)
+
+#get 95% CI for bernoulli data 
+plotData2 = RankTable[, .(mean = mean(AggressBool), 
+              CI1 = binom.confint(sum(AggressBool), 
+                                  length(AggressBool), 
+                                  conf.level = 0.95, method = 'logit')$lower,
+              CI2 = binom.confint(sum(AggressBool), 
+                                  length(AggressBool), 
+                                  conf.level = 0.95, method = 'logit')$upper),
+          by = .(Situation, Group_Size)]
+
+
+
+intensPlot2 = 
+  ggplot(plotData, aes(x = Situation, y = prob))+
+  geom_pointrange(data = plotData2, 
+                  aes(x = Situation, y= mean, ymin = CI1, ymax = CI2, 
+                      colour = "observed data"),
+                  size = 1,linewidth = 1.5,
+                  position = position_nudge(x = -0.03))+
+  geom_pointrange(aes(ymin = asymp.LCL, ymax = asymp.UCL,
+                      colour = "model estimates"), 
+                  size = 1, linewidth = 1.5,
+                  position = position_nudge(x = 0.03))+
+  scale_color_manual(name = NULL, values=c("observed data" = "grey", "model estimates" = "black"))+
+  labs(x = "Resource Condition", y= "Odds for high intensity aggression")+
+  facet_grid(.~Group_Size, labeller = labeller(Group_Size = c("large" = "large groups", "small" = "small groups")))+
+  scale_x_discrete(labels=c("FC", "HQ", "CON"))+
+  theme_bw(base_size = 18)+
+  theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank(), legend.position = "top")
+
+figIntensity = ggarrange(intensPlot1,intensPlot2, ncol = 2, labels = c("a)", "b)"), 
+                            font.label=list(color="black",size=16))
+
+ggsave(path = "plots", "Test.tiff", figIntensity, "tiff", width = 38, height= 15, units = "cm", dpi = 300)
+
 
 #### Patterns of aggression ############
 
 #strategy
 diagnA$strategy
-diagnD$strategy
+diagnB$strategy
 diagnC$strategy
 diagnD$strategy
 diagnE$strategy
 diagnF$strategy
 
+#focus & position
+diagnA$focus_pos
+diagnB$focus_pos
+diagnC$focus_pos
+diagnD$focus_pos
+diagnE$focus_pos
+diagnF$focus_pos
+
+####
+
 #strategy plots
-dom_plot_strategy(diagnA$focus_pos, diagnA$blur, show_data_ci = T)
-dom_plot_strategy(diagnB$focus_pos, diagnB$blur, show_data_ci = T)
-dom_plot_strategy(diagnC$focus_pos, diagnC$blur, show_data_ci = T)
-dom_plot_strategy(diagnD$focus_pos, diagnD$blur, show_data_ci = T)
-dom_plot_strategy(diagnE$focus_pos, diagnE$blur, show_data_ci = T)
-dom_plot_strategy(diagnF$focus_pos, diagnF$blur, show_data_ci = T)
+# Two rows, two columns
+par(mfrow = c(2, 3))
+
+# Plots
+
+adj_dom_plot_strategy(diagnA$focus_pos, diagnA$blur, show_data_ci = T)
+title("Pen A")
+legend("topleft", legend = c("Downward heuristic","Bullying","Close competitors","Undefined"),
+       col = "black",
+       pt.bg = c(
+         scales::alpha("white", 0.2),
+         scales::alpha("blue", 0.2),
+         scales::alpha("red", 0.2),
+         scales::alpha("grey", 0.4)
+       ),
+       pch = 22, cex = 1, pt.cex = 2)
+
+adj_dom_plot_strategy(diagnB$focus_pos, diagnB$blur, show_data_ci = T)
+title("Pen B")
+adj_dom_plot_strategy(diagnC$focus_pos, diagnC$blur, show_data_ci = T)
+title("Pen C")
+adj_dom_plot_strategy(diagnD$focus_pos, diagnD$blur, show_data_ci = T)
+title("Pen D")
+adj_dom_plot_strategy(diagnE$focus_pos, diagnE$blur, show_data_ci = T)
+title("Pen E")
+adj_dom_plot_strategy(diagnF$focus_pos, diagnF$blur, show_data_ci = T)
+title("Pen F")
+
+# Back to the original graphics device
+par(mfrow = c(1, 1))
+
+# Plot for Dynamics of interactions by rank (large)
+largePattern = 
+  ggplot(data = RankTable[Group_Size == "large",], aes(x = WinnerRank, y =LoserRank)) + 
+  #geom_smooth(se= FALSE)+#method = lm, formula = y ~ splines::bs(x, 3), se = FALSE)+
+  #geom_point(size = 2.5) + 
+  labs(y = 'Loser rank', x= 'Winner rank')+
+  theme_classic(base_size = 18)+
+  facet_grid(. ~ Pen)+
+  geom_density_2d_filled(alpha = 0.7, contour_var = "ndensity", breaks = c(0, 0.2, 0.4, 0.6, 0.8, 1), show.legend = FALSE)+
+  geom_abline(intercept = 0 , slope = 1, linetype = "dashed", colour = 'grey')+
+  geom_jitter(size = 0.6, width = 0.4)+
+  xlim(0.5,120)+
+  ylim(0.5,120)
+
 
 
 # Plot for Dynamics of interactions by rank (small)
-ggplot(data = RankTable[Group_Size == "small",], mapping = aes(x = WinnerRank, y =LoserRank)) + 
+smallPattern = 
+  ggplot(data = RankTable[Group_Size == "small",], mapping = aes(x = WinnerRank, y =LoserRank, shape = "observations")) + 
   #geom_smooth(se= FALSE)+#method = lm, formula = y ~ splines::bs(x, 3), se = FALSE)+
-  labs(y = 'Loser rank', x= 'Winner rank')+
   theme_classic(base_size = 18)+
-  theme(legend.position = "none")+
+  labs(y = 'Loser rank', x= 'Winner rank', shape = NULL, fill = "density \nrange")+
+  theme(legend.position = "top")+
   facet_grid(. ~ Pen)+
-  geom_density_2d_filled(alpha = 0.7, contour_var = "ndensity")+
+  geom_density_2d_filled(alpha = 0.7, contour_var = "ndensity", breaks = c(0, 0.2, 0.4, 0.6, 0.8, 1))+
   geom_abline(intercept = 0 , slope = 1, linetype = "dashed", colour = 'grey')+
-  geom_jitter(size = 1.2, width = 0.4)+
+  geom_jitter(size = 0.8, width = 0.4)+
   xlim(0.5,20.5)+
   ylim(0.5,20.5)
 
 
 
-# Plot for Dynamics of interactions by rank (large)
-ggplot(data = RankTable[Group_Size == "large",], mapping = aes(x = WinnerRank, y =LoserRank)) + 
-  #geom_smooth(se= FALSE)+#method = lm, formula = y ~ splines::bs(x, 3), se = FALSE)+
-  #geom_point(size = 2.5) + 
-  labs(y = 'Loser rank', x= 'Winner rank')+
-  theme_classic(base_size = 18)+
-  theme(legend.position = "none")+
-  facet_grid(. ~ Pen)+
-  #stat_density_2d(aes(fill = ..level..), geom="polygon")
-  #geom_density_2d(aes(colour = Pen), size = 2)
-  #geom_density_2d_filled(contour_var = "ndensity")
-  #geom_density_2d_filled(contour_var = "count") 
-  geom_density_2d_filled(alpha = 0.7, contour_var = "ndensity")+
-  geom_abline(intercept = 0 , slope = 1, linetype = "dashed", colour = 'grey')+
-  geom_jitter(size = 0.6, width = 0.4)+
-  xlim(0.5,120)+
-  ylim(0.5,120)
 
 # Example plot for Dynamics of interactions by rank 
 ggplot(data = RankTable[Pen == "E",], mapping = aes(x = WinnerRank, y =LoserRank)) + 
@@ -481,220 +662,16 @@ ggplot(data = RankTable[Pen == "E",], mapping = aes(x = WinnerRank, y =LoserRank
   xlim(0.5,20.5)+
   ylim(0.5,20.5)
 
+legend <- get_legend(smallPattern)
 
-########### Aggression Intensity #################
+figPattern = ggarrange(largePattern,smallPattern, nrow = 2, 
+                            font.label=list(color="black",size=16),widths = c(1,0.7), legend = "top", 
+                       align = "hv", legend.grob = legend)
 
-#facet by intensity
-ggplot(data = RankTable[Group_Size == "small",], mapping = aes(x = WinnerRank, y =LoserRank)) + 
-  #geom_smooth(se= FALSE)+#method = lm, formula = y ~ splines::bs(x, 3), se = FALSE)+
-  labs(y = 'Loser rank', x= 'Winner rank')+
-  theme_classic(base_size = 18)+
-  facet_grid(AggressLvl ~ Pen)+
-  geom_density_2d_filled(alpha = 0.7, contour_var = "count")+
-  geom_abline(intercept = 0 , slope = 1, linetype = "dashed", colour = 'grey')+
-  geom_jitter(size = 1, width = 0.4)+
-  xlim(1,20)+
-  ylim(1,20)
+ggsave(path = "plots", "Pattern.tiff", figPattern, "tiff", width = 25, height= 23, units = "cm", dpi = 300)
 
 
-# facet by aggression intensity
-ggplot(data = RankTable[Group_Size == "large",], mapping = aes(x = WinnerRank, y =LoserRank)) + 
-  #geom_smooth(se= FALSE)+#method = lm, formula = y ~ splines::bs(x, 3), se = FALSE)+
-  #geom_point(size = 2.5) + 
-  labs(y = 'Loser rank', x= 'Winner rank')+
-  theme_classic(base_size = 18)+
-  facet_grid(AggressLvl ~ Pen)+
-  geom_density_2d_filled(alpha = 0.7, contour_var = "count")+
-  geom_abline(intercept = 0 , slope = 1, linetype = "dashed", colour = 'grey')+
-  geom_jitter(size = 0.6, colour = 'black')+
-  xlim(1,120)+
-  ylim(1,120)
-
-
-#create dyad identifier
-#TODO: do they need to be unique as in winners and losers or rather dyad unique?
-RankTable[, Dyad := paste(Pen, Winner, Loser)]
-intensity.model = glmer( AggressBool ~ WinnerElo+ LoserElo + Situation+ Group_Size + 
-                           WinnerElo:Group_Size + Situation:WinnerElo + Group_Size:Situation +
-                           LoserElo:Group_Size + LoserElo:WinnerElo + LoserElo:Situation + (1|Dyad/Pen), data = RankTable, family = binomial)
-#failed to converge -> Pen barely any variation -> try without
-# non-physical set as reference 0
-intensity.model = glmer( AggressBool ~ WinnerElo+ LoserElo + Situation+ Group_Size + 
-                           WinnerElo:Group_Size + Situation:WinnerElo + Group_Size:Situation +
-                           LoserElo:Group_Size + LoserElo:WinnerElo + LoserElo:Situation + (1|Dyad), data = RankTable, family = binomial)
-
-resid.intensity = simulateResiduals(intensity.model)
-plot(resid.intensity)
-plotResiduals(resid.intensity, form = RankTable$DiffElo) #nearly perfect
-plotResiduals(resid.intensity, form = RankTable$Group_Size) #good
-plotResiduals(resid.intensity, form = RankTable$Situation) #good
-
-intensity.null = glmer( AggressBool ~ 1 + (1|Dyad), data = RankTable, family = binomial)
-anova(intensity.model, intensity.null, test = "Chisq")
-library(car)
-vif(intensity.model)
-#drop 2-way
-drop1(intensity.model, test = "Chisq")#, k = 2) #keep situation*Groupsize & Winner*Loser
-
-RankTable[, reLSituation := factor(Situation, levels = c("HQ", "Feeder", "Normal"))]
-RankTable[, reLGroup_Size := factor(Group_Size, levels = c("small", "large"))]
-
-intensity.model = glmer(AggressBool ~ WinnerElo+ LoserElo + reLSituation+ reLGroup_Size + 
-                                         reLGroup_Size:reLSituation + LoserElo:WinnerElo + (1|Dyad), 
-                        data = RankTable, family = binomial, glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 100000)))
-resid.intensity = simulateResiduals(intensity.model)
-plot(resid.intensity)
-plotResiduals(resid.intensity, form = RankTable$DiffElo) #nearly perfect
-plotResiduals(resid.intensity, form = RankTable$Group_Size) #good
-plotResiduals(resid.intensity, form = RankTable$Situation) #good
-intensity.model2 = glm(AggressBool ~ WinnerElo+ LoserElo + Situation+ Group_Size + 
-                        Group_Size:Situation, data = RankTable, family = binomial())
-
-
-summary(intensity.model)
-
-# TODO: WHAT IS THIS SUPPOSED TO DO?
-pchisq(intensity.model$deviance, df=intensity.model$df.residual, lower.tail=FALSE)
-library(ResourceSelection)
-hoslem.test(intensity.model$y, fitted(intensity.model), g=7)
-#This gives p=0.15, indicating no evidence of poor fit.
-exp(0.05686)
-require(rms)
-summary(RankTable$LoserElo)
-summary(RankTable$WinnerElo)
-summary(intensity.model, LoserElo=0)  # gives IQR odds ratio for WinnerElo
-summary(intensity.model, WinnerElo=c(1,3), LoserElo=0)  # OR for WinnerElo=1 vs. WinnerElo=3
-exp(0.21744+0.05686*LoserElo)
-
-anova(intensity.null,intensity.model, test = "Chisq")
-anova(intensity.model, intensity.model2, test = "Chisq")
-min(RankTable$LoserElo)
-
-#aggression intensity by winnerelo fixed at min mean or max loserelo
-winBeta = summary(emtrends(intensity.model, ~ LoserElo, var="WinnerElo", 
-                   at=list(LoserElo=c( min(RankTable$LoserElo),mean(RankTable$LoserElo), max(RankTable$LoserElo)))))
-winBeta$WinnerElo.trend = exp(winBeta$WinnerElo.trend)
-winBeta$asymp.LCL = exp(winBeta$asymp.LCL)
-winBeta$asymp.UCL = exp(winBeta$asymp.UCL)
-winBeta
-         
-parameters(intensity.model, exponentiate = TRUE)
-group_sit = emmeans(intensity.model, ~ pairwise ~ reLGroup_Size*reLSituation, type = "response")
-emmeans(intensity.model, ~ pairwise ~ WinnerElo*LoserElo, type = "response")
-emmeans(intensity.model, ~ WinnerElo, 
-        at = list(WinnerElo = c(min(RankTable$WinnerElo),mean(RankTable$WinnerElo),max(RankTable$WinnerElo))), type= "response")
-confint(group_sit, adjust = "bonferroni", level = 0.95)
-plot(allEffects(intensity.model))
-
-tab_model(intensity.model)
-plot_model(intensity.model, show.value = T)
-
-p2 = plot_model(intensity.model, type = "pred", terms = c("WinnerElo[all]", "LoserElo[-2.882, -0.441, 2.733]"))
-
-p2 + theme_classic(base_size = 18) + labs(title = "", x = "Elo rating of the winner", y = "Probability for high intensity aggression",
-                                          colour = "Elo rating of \nthe loser")+ geom_line(size = 2)
-
-##
-#Effect plots
-#Aggression intensity by WinnerElo -> can't be done because part of interaction
-
-RankTable[ ,PredictIntens := predict(intensity.model, type = "response")]
-
-ggplot(data = RankTable, aes(x = WinnerElo, y = PredictIntens, colour = factor(AggressBool)))+
-  geom_point()+
-  #facet_grid(.~Pen)+
-  theme_bw(base_size = 18)
-
-ggplot(data = Interact, aes(x = scaleElos))+
-  geom_point(aes(y = physAggr), size = 2, colour = "red")+
-  geom_smooth(aes(y = physAggr),colour = "red")+
-  geom_point(aes(y = nonphysAggr), size = 2, colour = "blue")+
-  geom_smooth(aes(y = nonphysAggr),colour = "blue")+
-    #facet_grid(.~Pen)+
-  theme_bw(base_size = 18)
-
-ggplot(data = na.omit(Interact), aes(x = scaleElos, y = ratioIntens))+
-  geom_point( size = 2)+
-  geom_smooth()+
-  #facet_grid(.~Pen)+
-  theme_bw(base_size = 18)
-
-plot_model(intensity.model, type = "pred", terms = c("WinnerElo[all]"))+
-  geom_rug()+
-  labs(x = "Elo of winner", y = "predicted probability for physical aggression")+
-  theme_classic(base_size = 18)
-
-#Aggression intensity by Situation and Group Size
-
-plot_model(intensity.model, type = "pred", terms = c("Group_Size", "Situation"),)+
-  theme_classic(base_size = 18)
-
-  
-plotData <- as.data.table(emmeans(intensity.model, ~ pairwise ~ Situation*Group_Size, type = "response")$emmeans)
-
-observedProb = RankTable[, .(prob = sum(AggressBool)/.N), by= .(Group_Size, Situation)]
-
-contrast = as.data.table(emmeans(intensity.model, ~ pairwise ~ Group_Size*Situation, type = "response")$contrasts)
-
-
-library(ggsignif)
-ggplot(plotData, aes(x = Group_Size, y = prob))+
-  geom_pointrange(aes(shape = Situation, ymin = asymp.LCL, ymax = asymp.UCL), position = position_dodge(width = 0.75), size = 1.5)+
-  #geom_point(data = observedProb, aes(shape = Situation), position = position_jitterdodge(jitter.width = 0.3) , size = 3, colour = "grey")+
-  labs(x = "Group size", y= "Predicted probability for high intensity aggression")+
-  ylim(0.1,1)+
-  scale_shape_discrete(labels=c('Feeder', 'Grape', 'Normal'))+
-  theme_classic(base_size = 18)
-  
-# p +   geom_signif( #large Feeder vs. large HQ
-#   annotation = "**",#formatC(contrast$p.value[2], digits = 1),
-#   y_position = 0.65, xmin = 0.75, xmax = 0.99,
-#   tip_length = c(0.2, 0.1),
-#   textsize = 8,
-#   size = 1
-# ) +
-#   
-#   geom_signif( #large HQ vs. large Normal
-#     annotation = "***",#formatC(contrast$p.value[11], digits = 1),
-#     y_position = 0.65, xmin = 1.01, xmax = 1.25,
-#     tip_length = c(0.1, 0.3),
-#     textsize = 8,
-#     size = 1
-#   )+
-#   
-#   geom_signif( #large Feeder vs. large Normal
-#     annotation = "0.06",#formatC(contrast$p.value[11], digits = 1),
-#     y_position = 0.75, xmin = 0.75, xmax = 1.25,
-#     tip_length = c(0.1, 0.1),
-#     textsize = 5,
-#     size = 1
-#   )+
-# geom_signif( #small Feeder vs. small HQ
-#   annotation = "***",#formatC(contrast$p.value[7], digits = 1),
-#   y_position = 0.8, xmin = 1.75, xmax = 1.99,
-#   tip_length = c(0.2, 0.04),
-#   textsize = 8,
-#   size = 1
-# ) +
-#   
-#   geom_signif( #small HQ vs. small Normal
-#     annotation = "**",#formatC(contrast$p.value[14], digits = 1),
-#     y_position = 0.8, xmin = 2.01, xmax = 2.25,
-#     tip_length = c(0.04, 0.2),
-#     textsize = 8,
-#     size = 1
-#   )+
-#   
-#   geom_signif( #small HQ vs. large HQ
-#     annotation = "*",#formatC(contrast$p.value[10], digits = 1),
-#     y_position = 0.95, xmin = 1, xmax = 2,
-#     tip_length = c(0.25, 0.1),
-#     textsize = 8,
-#     size = 1
-#   )
-
-
-####################### Individual contacts data ######################################
+#### Individual contacts data ######################################
 
 #How many individuals does one hen interact with? 
 
@@ -740,8 +717,8 @@ RankTable[WinnerRank == 3, .(min = min(LoserRank), max = max(LoserRank)), by = P
 RankTable[WinnerRank == 4, .(min = min(LoserRank), max = max(LoserRank)), by = Pen]
 RankTable[WinnerRank == 5, .(min = min(LoserRank), max = max(LoserRank)), by = Pen]
 
-
-###### Examples of steepness plots ##############
+#### Plots ##############
+##### Examples of steepness plots ##############
 
 #examples for hierarchy shape
 
