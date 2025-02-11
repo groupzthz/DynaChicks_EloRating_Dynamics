@@ -13,6 +13,7 @@ library(emmeans)
 library(effects)
 library(RColorBrewer) # color for plotting
 library(MASS) #for negative binomial glm
+library(car)
 set.seed(1)
 
 
@@ -22,14 +23,16 @@ arenaTest2 = fread("ArenaTest2.csv")
 Individ = fread("IndividualDataTests.csv")
 Individ[, scaleElo:= as.numeric(scale(elos)), by = Pen]
 Individ[, Unique:= paste0(Pen, ID)]
+Thermal = fread("ThermalResults.csv")
 
 #merging data
-tempData = merge(arenaTest1[, !c("Date", "Time", "Pophole", "Defaecation", "Behaviours", "Weight", "Claws", "Notes", "exclusionPot"), with = F], 
+tempData = merge(arenaTest1[, !c("Date", "Time", "Pophole", "Defaecation", "Behaviours", "Comb", "Weight", "Claws", "Notes", "exclusionPot"), with = F], 
                  Individ[, !c("Focals"), with = F], 
                  by = c("Pen", "ID"))
 
-fullData = merge(arenaTest2[,!c("Date", "Start", "Defaecation24", "Behaviours", "Weight26", "Claws26", "Notes26", "exclusionPot"), with = F ], 
+fullData = merge(arenaTest2[,!c("Date", "Start", "Defaecation24", "Behaviours", "Claws26","Comb26", "Weight26", "Notes26", "exclusionPot"), with = F ], 
                  tempData, by = c("Pen", "ID"))
+fullData = merge(Thermal, fullData, by = c("Pen", "ID"))
 
 fullData[, "Foot26" := LeftFoot26 + RightFoot26]
 fullData[, "Foot" := LeftFoot + RightFoot]
@@ -39,15 +42,25 @@ fullData[, StrangerElo := Individ$scaleElo[match(StrangerID, Individ$Unique)]]
 fullData[, Group_Size := as.factor(Group_Size)]
 fullData[, Offset := 600]
 
-#Achtung: AKO kein Elo da falsches Label während observations
+#change label names for plotting with facets
+fullData$plotGroup_Size <- factor(fullData$Group_Size, levels = c("large", "small"),
+                                  labels = c("large groups", "small groups"))
 
-#### Focal individuals ####
 
-#distribution of Elo ranking by Pen/Group_Size
+#Careful: AKO has no Elo because of wrong labels during observations
+
+#colours for plots
 largeCol = brewer.pal(n = 8, name = "Blues")[c(4,6,8)]
 smallCol = brewer.pal(n = 8, name = "OrRd")[c(4,6,8)]
 
-#elo by pen
+#### Focal individuals ####
+
+fullData[, list(Loser = sum(scaleElo <0), Winner = sum(scaleElo >0)), by = c("Group_Size")]
+# -> more subordinate tendency animals than dominant... especially in large groups
+
+#distribution of Elo ranking by Pen/Group_Size
+
+#Selected individuals in each pen
 ggplot(data = fullData, aes(x = Pen, y = scaleElo, fill = Pen, colour = Pen))+
   geom_hline(yintercept = 0, linetype = "dashed")+
   geom_point(data = Individ, aes(x = Pen, y = scaleElo, shape = "non focal"), colour = "black", alpha = 0.5, size = 1)+
@@ -65,35 +78,70 @@ ggplot(data = fullData, aes(x = Pen, y = scaleElo, fill = Pen, colour = Pen))+
   coord_flip()+
   scale_x_discrete(limits=rev)
 
+#distribution of Elo ratings by group size
 ggplot(data = fullData, aes(x = Group_Size, y = scaleElo))+
   geom_hline(yintercept = 0, linetype = "dashed")+
   geom_boxplot(outlier.shape = NA)+
   geom_point(alpha = 0.7, size = 3)+
   theme_classic(base_size = 18)
 
-fullData[, list(Loser = sum(scaleElo <0), Winner = sum(scaleElo >0)), by = c("Group_Size")]
-# -> more subordinate tendency animals than dominant... especially in large groups
 
-##### Badges of status ########
 
-#change label names for plotting with facets
-fullData$plotGroup_Size <- factor(fullData$Group_Size, levels = c("large", "small"),
-                                  labels = c("large groups", "small groups")
-)
+#### Badges of status ########
+
+
+##### model statistics ########
+
+#evaluated on the weight and comb size measured at 26 WoA 
+
+#Effect of badges of status on Elo
+badges_model = lmer(scaleElo ~ scale(Weight2)*scale(CombSize2)+ scale(CombSize2)*Group_Size + scale(Weight2)*Group_Size + (1|Pen), data = fullData)
+#singularity warning
+badges_model = lm(scaleElo ~ scale(Weight2)*scale(CombSize2)+ scale(CombSize2)*Group_Size + scale(Weight2)*Group_Size, data = fullData)
+resid.Badges<- simulateResiduals(badges_model, 1000)
+plot(resid.Badges)
+plotResiduals(resid.Badges, form = fullData$Group_Size) #heteroscedacity? still ok
+plotResiduals(resid.Badges, form = scale(fullData$CombSize2))
+plotResiduals(resid.Badges, form = scale(fullData$Weight2)) 
+
+vif(badges_model) # not too high co-linear (values <5)
+
+drop1(badges_model) #better without interactions
+
+badges_model.red = lm(scaleElo ~ scale(Weight2)+scale(CombSize2)+Group_Size, data = fullData)
+resid.Badges<- simulateResiduals(badges_model.red, 1000)
+plot(resid.Badges)
+plotResiduals(resid.Badges, form = fullData$Group_Size) #heteroscedacity? still ok
+plotResiduals(resid.Badges, form = scale(fullData$CombSize2)) 
+plotResiduals(resid.Badges, form = scale(fullData$Weight2)) 
+
+badges_model_null = lm(scaleElo ~ 1, data = fullData)
+
+AIC( badges_model.red, badges_model_null)
+anova(  badges_model_null, badges_model.red)
+r.squaredGLMM(badges_model.red, badges_model_null)
+
+summary(badges_model.red)
+
+
+##### plots ########
+
+#Comb size and Elo rating
 ggplot(data= fullData, aes(y = scaleElo)) + 
   geom_point(aes( x = CombSize2))+ 
-  geom_smooth(aes( x = CombSize2), method = lm, formula = y~x) + 
+  geom_smooth(aes( x = CombSize2), method = lm, formula = y~x, colour = "black") + 
   geom_point(aes( x = CombSize1))+ 
   geom_smooth(aes( x = CombSize1), method = lm, formula = y~x) + 
-  facet_grid(.~plotGroup_Size)+
+  facet_grid(.~Group_Size)+
   theme_bw(base_size = 18)+
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank())+
   labs(x = "Comb Size (cm²)", y = "scaled Elo rating")
 
+#weight and Elo rating
 ggplot(data= fullData, aes(y = scaleElo)) + 
   geom_point(aes( x = Weight2))+ 
-  geom_smooth(aes( x = Weight2), method = lm, formula = y~x) + 
+  geom_smooth(aes( x = Weight2), method = lm, formula = y~x, colour = "black") + 
   geom_point(aes( x = Weight1))+ 
   geom_smooth(aes( x = Weight1), method = lm, formula = y~x) +
   facet_grid(.~plotGroup_Size)+
@@ -102,129 +150,13 @@ ggplot(data= fullData, aes(y = scaleElo)) +
         panel.grid.minor = element_blank())+
   labs(x = "Weight (g)", y = "scaled Elo rating")
 
-#cast from wide to long
-weightCast = melt(fullData[, .SD, .SDcols = c("Pen", "ID", "scaleElo", "Group_Size", "Weight1", "Weight2")], 
-            id.vars = c("Pen","ID", "scaleElo", "Group_Size"),
-            variable.name = "WMeasure", value.name = "Weight")
-weightCast[, WoA := ifelse(WMeasure == "Weight1", 16, 26)]
-
-combCast = melt(fullData[, .SD, .SDcols = c("Pen", "ID", "scaleElo", "Group_Size", "CombSize1", "CombSize2")], 
-                  id.vars = c("Pen","ID", "scaleElo", "Group_Size"),
-                  variable.name = "CMeasure", value.name = "CombSize")
-combCast[, WoA := ifelse(CMeasure == "CombSize1", 16, 26)]
-
-longData = combCast[weightCast, on = c("Pen","ID", "scaleElo", "Group_Size", "WoA")]
-longData[, uID := paste0(Pen, ID)]
-
-#weight over time
-ggplot(data= longData, aes(x = Weight, y = scaleElo)) + 
-  geom_point()+
-  geom_line(aes(group = uID))+
-  facet_grid(.~Group_Size)+
-  theme_bw(base_size = 18)+
-  theme(panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank())+
-  labs(x = "Weight (g)", y = "scaled Elo rating")
-ggplot(data= longData, aes(x = WoA, y = Weight, colour = scaleElo)) + 
-  geom_point()+
-  geom_line(aes(group = uID))+
-  facet_grid(.~Group_Size)+
-  theme_bw(base_size = 18)+
-  theme(panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank())+
-  labs(x = "Weight (g)", y = "scaled Elo rating")
-
-#comb size over time
-ggplot(data= longData, aes(x = CombSize, y = scaleElo)) + 
-  geom_point()+
-  geom_line(aes(group = uID))+
-  facet_grid(.~Group_Size)+
-  theme_bw(base_size = 18)+
-  theme(panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank())+
-  labs(x = "Comb size (cm²)", y = "scaled Elo rating")
-ggplot(data= longData, aes(x = WoA, y = CombSize, colour = scaleElo)) + 
-  geom_point()+
-  geom_line(aes(group = uID))+
-  facet_grid(.~Group_Size)+
-  theme_bw(base_size = 18)+
-  theme(panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank())+
-  labs(x = "Weight (g)", y = "scaled Elo rating")
-
-
 
 #are weight and comb size correlated?
-cor.test(fullData[,CombSize2], fullData[,Weight2])
+cor.test(fullData[,CombSize2], fullData[,Weight2]) # not very high r = 0.28
 ggplot(data= fullData, aes(y = Weight2, x = CombSize2)) + 
   geom_point()+ 
   geom_smooth(method = lm, formula = y~x) + 
   facet_grid(.~Group_Size)
-
-#Effect of badges of status on Elo
-badges_model = lmer(scaleElo ~ scale(Weight2)*scale(CombSize2)+ scale(CombSize2)*Group_Size + scale(Weight2)*Group_Size + (1|Pen), data = fullData)
-#singularity warning
-badges_model = lm(scaleElo ~ scale(Weight2)*scale(CombSize2)+ scale(CombSize2)*Group_Size + scale(Weight2)*Group_Size, data = fullData)
-resid.Badges<- simulateResiduals(badges_model, 1000)
-plot(resid.Badges)
-plotResiduals(resid.Badges, form = fullData$Group_Size) #heteroscedacity?
-plotResiduals(resid.Badges, form = scale(fullData$CombSize2)) # problem?
-plotResiduals(resid.Badges, form = scale(fullData$Weight2)) 
-library(car)
-vif(badges_model) # not too high co-linear (values <5)
-
-### Yamenah: THERE IS NOT MUCH HETEROSCEDASTICITY: GIVEN ANIMAL DATA THIS IS AN ALMOST PERFECT FIT
-
-#without accounting for hetero
-drop1(badges_model) #better without interactions
-
-badges_model.red = lm(scaleElo ~ scale(Weight2)+scale(CombSize2)+Group_Size, data = fullData)
-resid.Badges<- simulateResiduals(badges_model.red, 1000)
-plot(resid.Badges)
-plotResiduals(resid.Badges, form = fullData$Group_Size) #heteroscedacity?
-plotResiduals(resid.Badges, form = scale(fullData$CombSize2)) 
-plotResiduals(resid.Badges, form = scale(fullData$Weight2)) 
-badges_model_null = lm(scaleElo ~ 1, data = fullData)
-AIC(badges_model_null, badges_model.red)
-r.squaredGLMM(badges_model.red, badges_model_null)
-# #if account for heteroscedacity
-# 
-# library(glmmTMB)
-# fullData[, rowNum := 1:.N]
-# badges.glmm <- glmmTMB(formula = scaleElo ~ scale(Weight2)*scale(CombSize2)+ 
-#                                                   scale(CombSize2)*Group_Size + 
-#                                                   scale(Weight2)*Group_Size + (1|Pen) + diag(Group_Size + 0 | rowNum), 
-#                                           dispformula = ~ 0,  # = default i.e. homoscedastic error variance
-#                                            REML = F,        # needs to be stated since default = ML
-#                                            data = fullData)
-# resid.Badges<- simulateResiduals(badges.glmm, 1000)
-# plot(resid.Badges)
-# plotResiduals(resid.Badges, form = fullData$Group_Size) 
-# plotResiduals(resid.Badges, form = scale(fullData$CombSize2)) 
-# plotResiduals(resid.Badges, form = scale(fullData$Weight2))
-# 
-# 
-# badges.glmm.null <- glmmTMB(formula = scaleElo ~ 1 + (1|Pen) + diag(Group_Size + 0 | rowNum), 
-#                        dispformula = ~ 0,  # = default i.e. homoscedastic error variance
-#                        REML = F,        # needs to be stated since default = ML
-#                        data = fullData)
-# 
-# anova(badges.glmm, badges.glmm.null)
-# # NO SIGNIFICANT DIFFERENCE BETWEEN FULL AND NULL
-
-# drop1(badges.glmm, test = "Chisq")
-# badges.glmm.red <- glmmTMB(formula = scaleElo ~ scale(Weight2)+scale(CombSize2)+ Group_Size + (1|Pen) + diag(Group_Size + 0 | rowNum), 
-#                        dispformula = ~ 0,  # = default i.e. homoscedastic error variance
-#                        REML = F,        # needs to be stated since default = ML
-#                        data = fullData)
-# resid.Badges<- simulateResiduals(badges.glmm.red, 1000)
-# plot(resid.Badges)
-# plotResiduals(resid.Badges, form = fullData$Group_Size) 
-# plotResiduals(resid.Badges, form = scale(fullData$CombSize2)) 
-# plotResiduals(resid.Badges, form = scale(fullData$Weight2))
-# 
-# anova(badges.glmm.red, badges.glmm.null) # not better than null
-# summary(badges.glmm.red)
 
 
 ###
@@ -243,30 +175,6 @@ ggplot(data= fullData, aes(y = sum, x = Weight2)) +
   geom_smooth(method = lm, formula = y~x) + 
   facet_grid(.~Group_Size)
 
-fullData[, rowNum := 1:84]
-
-badges.model2 = glmer(sum ~ scale(CombSize2)*Group_Size + (1|Pen), 
-                      data = fullData, family = poisson)
-resid.Badges<- simulateResiduals(badges.model2, 1000)
-plot(resid.Badges) #overdispersal
-#adjust for overdispersion:
-badges.model2 = glmer.nb(sum ~ CombSize2*Group_Size + (1|Pen), 
-                         data = fullData)
-#singularity fit:
-library(MASS)
-badges.model2 = glm.nb(sum ~ CombSize2*Group_Size, 
-                       data = fullData)
-resid.Badges<- simulateResiduals(badges.model2, 1000)
-plot(resid.Badges)
-plotResiduals(resid.Badges, form = fullData$Group_Size) #good
-plotResiduals(resid.Badges, form = scale(fullData$CombSize2)) # good
-
-badges.model2.null = glm.nb(sum ~ 1, 
-                            data = fullData)
-anova(badges.model2, badges.model2.null) # significantly better the null 
-
-#no further reduction as we are specifically interested in interaction
-summary(badges.model2) #no significant effects
 
 #### Fear test ##########
 
@@ -298,9 +206,9 @@ plot(resid.Lat)
 plotResiduals(resid.Lat, form = fullData$scaleElo)
 plotResiduals(resid.Lat, form = fullData$Group_Size)
 
-Lat.model.null = glm.nb( Box ~ 1 , data = fullData)#TODO: with offset or only 1
-AIC(Lat.model, Lat.model.null) #worse than null
-
+Lat.model.null = glm.nb( Box ~ 1+ offset(log(Offset)), data = fullData)#TODO: why AIC different?
+AIC(Lat.model.red, Lat.model.null) #worse than null
+anova(Lat.model.null, Lat.model.red, test = "Chisq")
 r.squaredGLMM(Lat.model.red, Lat.model.null)
 
 
@@ -473,10 +381,29 @@ plotResiduals(resid.Feeding, form = fullData$scaleElo)
 
 Feeding.null = glm(Feeding ~ 1, data = fullData, family = binomial)
 AIC(Feeding.null, Feeding.model)# only trend to be better than null??
+anova(Feeding.null, Feeding.model, test = "Chisq")
 
 summary(Feeding.model.red)
 parameters(Feeding.model.red, exponentiate = T)
 r.squaredGLMM(Feeding.model.red, Feeding.null)
+
+### plot
+
+plotData = summary(emmeans(Feeding.model.red, ~scaleElo, at = list(scaleElo = seq(from = min(fullData$scaleElo),
+                                                               to = max(fullData$scaleElo), by = 0.1)), type = "response"))
+
+ggplot(plotData, aes(x = scaleElo, y = prob))+
+  geom_jitter(data = fullData, aes(y = Feeding, colour = Pen), height = 0.02,size = 2.5)+
+  geom_ribbon(aes(ymin = asymp.LCL, ymax = asymp.UCL), fill = "grey70", alpha = 0.7) +
+  geom_line(linewidth = 1)+
+  theme_classic(base_size = 18)+
+  labs(x = 'scaled Elo ratings', y = "Probability for feeding in the arena")+
+  #scale_x_continuous(breaks = plotbreaks, #which(!duplicated(varOfInterest[,WoA]))
+  #                   labels = c("25", "35", "45" , "55"))+
+  scale_color_manual(values=c(largeCol, smallCol))+
+  guides(color = guide_legend(order = 1), linetype = guide_legend(order = 2)) +
+  theme(panel.background = element_rect(color = "black", size = 1))
+
 
 ###### SOCIAL TIME #####
 #PROBLEM WITH THE DATA:
@@ -564,7 +491,7 @@ ggplot(data= plotData, aes(x = Group_Size, y = value, fill = variable))+
   geom_violin(draw_quantiles = c(0.5))+
   geom_point(position = position_jitterdodge(jitter.width = 0.2))
 
-#### Familiarity test #########
+#### Recognition test #########
 
 ###### FIRST CHOICE ######
 #Side bias
@@ -587,6 +514,7 @@ choiceData2[,ChoiceDirectionBool := ifelse(ChoiceDirection == "Right", 0, 1)]
 
 #right is set as reference 0
 choice.model = glmer(ChoiceDirectionBool ~ scaleElo*Group_Size + scaleElo*Side_Familiar + Group_Size*Side_Familiar + (1|Pen), data = choiceData2, family = "binomial")
+#Singularity
 choice.model = glm(ChoiceDirectionBool ~ scaleElo*Group_Size + scaleElo*Side_Familiar + Group_Size*Side_Familiar, data = choiceData2, family = "binomial")
 
 resid.choice<- simulateResiduals(choice.model, 1000)
@@ -596,9 +524,9 @@ plotResiduals(resid.choice, form = choiceData2$Group_Size)
 plotResiduals(resid.choice, form = choiceData2$scaleElo)
 
 #drop 2-way
-drop1(choice.model) #keep scaleElo*Side_Familiar
+drop1(choice.model) #no clear indication that any interactions make the model better
 
-choice.model.red = glm(ChoiceDirectionBool ~ scaleElo*Side_Familiar + Group_Size, data = choiceData2, family = "binomial")
+choice.model.red = glm(ChoiceDirectionBool ~ scaleElo+ Side_Familiar + Group_Size, data = choiceData2, family = "binomial")
 resid.choice<- simulateResiduals(choice.model.red, 1000)
 plot(resid.choice) # problematic?
 plotResiduals(resid.choice, form = choiceData2$Side_Familiar)
@@ -607,6 +535,7 @@ plotResiduals(resid.choice, form = choiceData2$scaleElo)
 
 choice.model.null = glm(ChoiceDirectionBool ~ 1, data = choiceData2, family = "binomial")
 AIC(choice.model.null, choice.model.red) # no clear difference
+anova(choice.model.null, choice.model.red, test = "Chisq")
 
 summary(choice.model.red)
 parameters(choice.model.red, exponentiate = TRUE)
@@ -663,7 +592,7 @@ ggplot(data = na.omit(meltData), aes(x = FirstChoice.x, y = ratioDur, group = va
   labs(x = "First choice of field", y = "Time spent in field", color = "Field")
 
 
-###### FAMILIAR TIME ######
+###### FLOCKMATE TIME ######
 
 #PROBLEM WITH THE DATA:
 # zero not defined for geometric mean = exp(mean(log(x))) or transformation
@@ -725,10 +654,11 @@ plot(allEffects(model.Familiar.red))
 library(lmerTest)
 anova(model.test.3)
 
-library(lsmeans)
-lsmeans(model.Familiar.red, pairwise ~   FirstEntry*Group_Size) #this is needed to get all comparisons
+emmeans(model.Familiar.red, pairwise ~   FirstEntry*Group_Size) #this is needed to get all comparisons
 #do not show p-values from contrasts (no correction!! also only trend too weak for post-hoc because of power)
 #mach plots in greyscale
+
+
 
 boxplot(modelData$Familiar~modelData$FirstEntry)
 # to be on safe side:
@@ -754,41 +684,29 @@ plot(resid.model) # good
 plotResiduals(resid.model, form = modelData$FirstEntry)#good
 plotResiduals(resid.model, form = modelData$Group_Size)#good
 
-modelData$Group_Size = factor(modelData$Group_Size, levels=c("small", "large"), labels = c("small group", "large group"))
+modelData$Group_Size = factor(modelData$Group_Size, levels=c("large", "small"), labels = c("large group", "small group"))
 
-plotPoints = as.data.frame(lsmeans(model.Familiar.red, pairwise ~ Group_Size | FirstEntry))
+plotPoints = as.data.frame(emmeans(model.Familiar.red, pairwise ~ Group_Size | FirstEntry))
 plotPoints = as.data.table(plotPoints)[1:4, ]
 
-plotPoints$Group_Size = factor(plotPoints$Group_Size, levels=c("small", "large"), labels = c("small group", "large group"))
+plotPoints$Group_Size = factor(plotPoints$Group_Size, levels=c("large", "small"), labels = c("large group", "small group"))
 
-#library(ggsignif)
+
 #plot of data
 pp = ggplot(modelData, aes(x = FirstEntry, y = Familiar))+
   #geom_boxplot(aes(fill = Group_Size), alpha = 0.5)+
   geom_jitter(aes(colour = Pen),width = 0.1,
              size = 2)+
-  geom_pointrange(data=plotPoints, mapping=aes(y=lsmean, ymin=upper.CL, ymax=lower.CL), 
+  geom_pointrange(data=plotPoints, mapping=aes(y=emmean, ymin=lower.CL, ymax=upper.CL), 
                   position = position_dodge(width = 0.75), size=1, shape=22)+
-    labs(x = "Animal first visited", y = "Time spent with familiar")+
-  theme_bw(base_size = 18)+
+    labs(x = "Animal first visited", y = "Time spent with flockmate")+
+  scale_x_discrete(labels=c("Flockmate", "Non-\nflockmate"))+
+  theme_bw(base_size = 14)+
   scale_color_manual(values=c(largeCol, smallCol))+
   facet_grid(.~Group_Size)+
-  theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank())+
-  guides(colour = "none")
-# plot + geom_signif(stat = "identity",
-#                    data = data.frame(x = c(1.23, 0.83),
-#                                      xend = c(2.18, 1.23),
-#                                      y = c(350, 330),
-#                                      annotation = c("p = .03", "p = .02"),
-#                                      textsize = c(5,5)),
-#                    aes(x = x,
-#                        xend = xend,
-#                        y = y,
-#                        yend = y,
-#                        annotation = annotation,
-#                        textsize = textsize), 
-# )
-ggsave("FamiliarTime2.tiff", pp, "tiff", width = 13, height = 13, units = "cm", dpi = 300)
+  theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank())
+
+ggsave(path = "plots", "FlockmateTime2.tiff", pp, "tiff", width = 16, height = 11, units = "cm", dpi = 300)
 
 #for comparison purposes: show time with familiar vs time with unfamiliar
 longData = melt(modelData[, .SD, .SDcols = c("Pen", "ID", "scaleElo", "Group_Size", "Familiar", "Stranger", "FirstEntry")], 

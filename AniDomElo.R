@@ -6,7 +6,7 @@ rm(list = ls())
 
 library(aniDom) # randomised Elo-rating
 library(EloRating) # original Elo rating
-library(domstruc) # focus and position (who interacts with whom)
+library(domstruc) # pattern of aggression (who interacts with whom)
 library(data.table) # data.frame better
 #library(compete) # needed for aniDom (poisson) calculation
 library(ggplot2) # plotting
@@ -21,11 +21,12 @@ library(emmeans) #model means
 library(effects) #model effects visualisation
 library(RColorBrewer) # color for plotting
 library(EloSteepness) # for steepness measure
-library(sjPlot)
-library(nlstools)
-library(elo)
 library(ggpubr)#plot combination
-library(binom) #confidence intervall for binomial sample
+
+#library(sjPlot)
+#library(nlstools)
+#library(elo)
+#library(binom) #confidence intervall for binomial sample
 source('helper_functions_Elo.R')
 source('plot_utils.R')
 set.seed(42)
@@ -77,7 +78,7 @@ PenA = PenA[Winner != "ZA" & Loser != "ZA"]
 rm(dataMature, 
    PenAt, PenBt, PenCt, PenDt, PenEt, PenFt)
 
-#### Diganostics, transitivity ###############################################################
+#### Diagnostics, transitivity ###############################################################
 
 # Dataset analytics:
 #number of observations by resource condition
@@ -161,13 +162,16 @@ steepF = elo_steepness_from_sequence(winner = PenF$Winner,
                                      cores = 2)
 
 #example of one output
-summary(steepA)
+summary(steepD)
 plot_steepness(steepD)
 plot_scores(steepD)
-plot_steepness_regression(steepD)
+plot_steepness_regression(steepD, width_fac = 5)
 D_scores <- as.data.table(scores(steepD, quantiles = c(0.055, 0.945)))
 
 #### Data tables for analyses #################
+#colors for large and small groups
+largeCol = brewer.pal(n = 8, name = "Blues")[c(4,6,8)]
+smallCol = brewer.pal(n = 8, name = "OrRd")[c(4,6,8)]
 
 # Overview of data of all individuals 
 Interact = rbind(ratingA$Individuals, ratingB$Individuals, ratingC$Individuals, ratingD$Individuals,
@@ -224,6 +228,8 @@ RankTable[, AggressBool := ifelse(AggressLvl == "non_physical", 0, 1)]
 #Descriptives
 #divide number of interactions to not count them twice
 descript = Interact[, .(Sum = sum(sum)/2, N = .N), by = Group_Size]
+descript[, rate := (Sum/N/100)*60]
+descript = Interact[, .(Sum = sum(sum)/2, N = .N), by = Pen]
 descript[, rate := (Sum/N/100)*60]
 #Interact[, summary(sum), by = Group_Size]
 
@@ -329,6 +335,31 @@ postHocCond = emmeans(sum.model.red1, ~ pairwise ~Situation,
                       type = "response", offset = log(InteractWide$Minutes))
 confint(postHocCond, adjust = "bonferroni", level = 0.95)
 
+#test model without resource conditions
+testInteract = InteractWide[Situation == "HQ_all"]
+
+hist(testInteract$Sum) #-> poisson model
+
+# poly(raw= T) otherwise impossible estimates with raw = F 
+sum.model = glmer.nb(Sum ~ poly(scaleElos,2, raw = TRUE) + scaleElos*Group_Size+(1|Pen), testInteract)
+resid.df2<- simulateResiduals(sum.model, 1000)
+plot(resid.df2) 
+plotResiduals(resid.df2, form = testInteract$Group_Size) #good
+plotResiduals(resid.df2, form = testInteract$scaleElos) #good
+
+drop1(sum.model)
+sum.model = glmer.nb(Sum ~ poly(scaleElos,2, raw = TRUE) + Group_Size+(1|Pen), testInteract)
+resid.df2<- simulateResiduals(sum.model, 1000)
+plot(resid.df2) 
+plotResiduals(resid.df2, form = testInteract$Group_Size) #good
+plotResiduals(resid.df2, form = testInteract$scaleElos) #good
+
+sum.model.null = glmer.nb(Sum ~ 1+(1|Pen), testInteract)
+AIC(sum.model.null, sum.model)
+summary(sum.model)
+parameters(sum.model, exp = TRUE)
+
+
 ##### plots #####
 
 #save model estimates
@@ -339,16 +370,14 @@ plotSums[, Sum_HQ_all := (Sum_HQ_all/40)*30]
 plotSums[, Sum := Sum_HQ_all + Sum_Feed_all + Sum_Normal_all]
 plotSums[, PredictSum := PredictSum_HQ_all + PredictSum_Feed_all + PredictSum_Normal_all]
 
-#colors for large and small groups
-largeCol = brewer.pal(n = 8, name = "Blues")[c(4,6,8)]
-smallCol = brewer.pal(n = 8, name = "OrRd")[c(4,6,8)]
+
 
 
 #effect plot of Elo and number of interactions split by group
 eloPlot = ggplot(data = plotSums, mapping = aes(x = scaleElos, y =Sum, colour = Pen)) + 
   geom_smooth(aes(x = scaleElos, y = PredictSum), se= FALSE)+#method = glmer.nb, formula = y ~ splines::bs(x, 3), se = FALSE)+
   geom_point(size = 2.5) + 
-  labs(x = 'Scaled Elo rating', y = 'Number of interactions')+
+  labs(x = 'Scaled Elo rating', y = 'Sum of interactions')+
   facet_grid(.~ Group_Size,labeller = labeller(Group_Size = c("large" = "large groups", "small" = "small groups"))) + 
   theme_bw(base_size = 18)+
   scale_color_manual(values=c(largeCol, smallCol))+
@@ -368,7 +397,7 @@ ggplot(plotData, aes(x = Situation, y = response))+
                   fill="yellow")+
   scale_color_manual(values=c(largeCol, smallCol))+
   facet_grid(.~ Group_Size,labeller = labeller(Group_Size = c("large" = "large groups", "small" = "small groups"))) + 
-  labs(x = "Resource condition", y= "Number of interactions")+
+  labs(x = "Resource condition", y= "Sum of interactions")+
   scale_shape_manual(name = NULL, values = c("model estimate" = 23))+
   guides(colour = guide_legend(order = 1),
          shape = guide_legend(order = 2))+
@@ -377,7 +406,6 @@ ggplot(plotData, aes(x = Situation, y = response))+
   theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank(), legend.position = "top")
 
 plotData <- as.data.table(emmeans(sum.model.red1, ~ pairwise ~Situation, type = "response", offset = log(InteractWide$Minutes))$emmeans)
-
 
 #plot used in paper
 condPlot = 
@@ -394,24 +422,25 @@ condPlot =
                   size = 1, linewidth = 1.5,
                   position = position_nudge(x = 0.025))+
   scale_color_manual(name = NULL, values=c("observed data" = "grey", "model estimates" = "black"))+
-  labs(x = "Resource Condition", y= "Number of interactions")+
+  labs(x = "Resource condition", y= "Sum of interactions")+
   scale_x_discrete(labels=c("HQ", "FC", "CON"))+
   theme_classic(base_size = 18)
 
 
-legend <- get_legend(condPlot)
-
 figInteractions = ggarrange(eloPlot,condPlot, ncol = 2, labels = c("a)", "b)"), 
-                             font.label=list(color="black",size=16),widths = c(1,0.7), legend = "top", legend.grob = legend)
+                             font.label=list(color="black",size=16),widths = c(1,0.7), legend = "right")
 
-ggsave(path = "plots", "Test.tiff", figInteractions, "tiff", width = 38, height= 15, units = "cm", dpi = 300)
+ggsave(path = "plots", "SumInteractions.tiff", figInteractions, "tiff", width = 35, height= 18, units = "cm", dpi = 300)
 
 
 #### Aggression Intensity #################
 
+#descriptors
+descript = RankTable[, .(Sum = sum(AggressBool), N = .N, perc = sum(AggressBool)/.N), by = Pen]
+
 
 #create dyad identifier
-RankTable[, Dyad := paste(sort(c(Winner, Loser)), collapse = " "), by = 1:nrow(test)]
+RankTable[, Dyad := paste(sort(c(Winner, Loser)), collapse = " "), by = 1:nrow(RankTable)]
 RankTable[, Dyad := paste(Pen, Dyad)]
 
 
@@ -478,10 +507,11 @@ emmeans(intensity.model, ~ WinnerElo,
 winBeta = summary(emtrends(intensity.model, ~ LoserElo, var="WinnerElo", 
                    at=list(LoserElo=c( min(RankTable$LoserElo),
                                        mean(RankTable$LoserElo), 
-                                       max(RankTable$LoserElo)))), adjust = "bonferroni", level = 0.95)
-winBeta$WinnerElo.trend = exp(winBeta$WinnerElo.trend)
-winBeta$asymp.LCL = exp(winBeta$asymp.LCL)
-winBeta$asymp.UCL = exp(winBeta$asymp.UCL)
+                                       max(RankTable$LoserElo)))), adjust = "bonferroni", level = 0.95, type = "response")
+#if odds ratio is needed exponentiate instead of probability
+#winBeta$WinnerElo.trend = exp(winBeta$WinnerElo.trend)
+#winBeta$asymp.LCL = exp(winBeta$asymp.LCL)
+#winBeta$asymp.UCL = exp(winBeta$asymp.UCL)
 winBeta
 
 
@@ -494,35 +524,36 @@ confint(group_sit, adjust = "bonferroni", level = 0.95)
 
 #Aggression intensity by WinnerElo*LoserElo
 
-RankTable[,PredictIntens := predict(intensity.model, type = "response")]
+#change to show interaction between winner and loser elo at fix loserElo and range of winner
+plotData = as.data.table(summary(emmeans(intensity.model, ~ WinnerElo*LoserElo, 
+                          at = list(WinnerElo = seq(from = min(Interact$scaleElo), to = max(Interact$scaleElo), 
+                                             by = 0.1),
+                             LoserElo = c(min(Interact$scaleElo),mean(Interact$scaleElo),max(Interact$scaleElo))), type= "response")))
+
+plotData[, LoserCat := "mean" ]
+plotData[LoserElo %in% min(unique(LoserElo)), LoserCat := "min" ]
+plotData[LoserElo %in% max(unique(LoserElo)), LoserCat := "max" ]
+plotData[, LoserCat := as.factor(LoserCat)]
+
 #change level order
-RankTable[, Situation := factor(Situation, levels = c("Feeder", "HQ","Normal"))]
-
-#get values to split the Elo ratings in three equal parts
-split = Interact[, quantile(unique(scaleElos), probs = c(1/4, 3/4))]
-
-RankTable[, LoserSplit := "low Elo"]
-RankTable[LoserElo > split[1], LoserSplit := "mid Elo"]
-RankTable[LoserElo > split[2], LoserSplit := "high Elo"]
+#RankTable[, Situation := factor(Situation, levels = c("Feeder", "HQ","Normal"))]
 
 
 intensPlot1 = 
-  ggplot(RankTable, aes(x = WinnerElo, y = AggressBool, colour = Pen))+
-  geom_jitter(height = 0.02, alpha = 0.5)+
-  #geom_smooth(aes(colour = Ratio,group = as.factor(HenID)),se = F)+
-  geom_smooth(data = RankTable[LoserSplit == "low Elo", .(meanIntens = mean(PredictIntens, na.rm = TRUE)), by = WinnerElo], 
-              aes(y = meanIntens, linetype = "<25%"), linewidth = 1.2, se = F, colour = "black")+
-  geom_smooth(data = RankTable[LoserSplit == "mid Elo", .(meanIntens = mean(PredictIntens, na.rm = TRUE)), by = WinnerElo], 
-              aes(y = meanIntens, linetype = "average"), linewidth = 1.2, se = F, colour = "black")+
-  geom_smooth(data = RankTable[LoserSplit == "high Elo", .(meanIntens = mean(PredictIntens, na.rm = TRUE)), by = WinnerElo], 
-              aes(y = meanIntens, linetype = ">75%"), linewidth = 1.2, se = F, colour = "black")+
+  ggplot(plotData, aes(x = WinnerElo, y = prob)) +
+  geom_jitter(data = RankTable, aes(y = AggressBool, colour = Pen),
+              height = 0.02, alpha = 0.5)+
+  geom_ribbon(aes(ymin = asymp.LCL, ymax = asymp.UCL, fill = LoserCat), alpha = 0.6) +
+  geom_line(aes(linetype = LoserCat), linewidth = 1)+
   theme_classic(base_size = 18)+
-  labs(x = 'Elo rating of Winners', y = "Odds for high intensity aggression")+
-  #scale_x_continuous(breaks = plotbreaks, #which(!duplicated(varOfInterest[,WoA]))
+  labs(x = 'Elo rating of Winners', y = "Probability for high intensity aggression",
+       )+
+  #scale_x_continuous(breaks = plotbreaks, #which(!duplicated(varOfInterest[,WoA])) 
   #                   labels = c("25", "35", "45" , "55"))+
-  scale_color_manual(values=c(largeCol, smallCol))+
-  scale_linetype_manual(name = "Losers Elo \nrating range", values = c("<25%" = "dashed", "average" = "solid", ">75%" = "dotted")) +
-  guides(color = guide_legend(order = 1), linetype = guide_legend(order = 2)) +
+  scale_color_manual( values=c(largeCol, smallCol))+
+  scale_fill_manual(name = "Elo rating \nof losers", values=c("grey70", "grey40", "grey90"))+
+  scale_linetype_manual(name = "Elo rating \nof losers", values = c("min" = "dotted", "mean" = "solid", "max" = "dashed")) +
+  guides(color = guide_legend(order = 1), "Elo rating \nof losers" = guide_legend(order = 2)) +
   theme(panel.background = element_rect(color = "black", size = 1))
 
 
@@ -541,6 +572,11 @@ plotData2 = RankTable[, .(mean = mean(AggressBool),
           by = .(Situation, Group_Size)]
 
 
+#change level order
+plotData[, Group_Size := factor(Group_Size, levels = c("large", "small"))]
+plotData[, Situation := factor(Situation, levels = c("HQ","Feeder","Normal"))]
+plotData2[, Group_Size := factor(Group_Size, levels = c("large", "small"))]
+plotData2[, Situation := factor(Situation, levels = c("HQ","Feeder","Normal"))]
 
 intensPlot2 = 
   ggplot(plotData, aes(x = Situation, y = prob))+
@@ -554,16 +590,16 @@ intensPlot2 =
                   size = 1, linewidth = 1.5,
                   position = position_nudge(x = 0.03))+
   scale_color_manual(name = NULL, values=c("observed data" = "grey", "model estimates" = "black"))+
-  labs(x = "Resource Condition", y= "Odds for high intensity aggression")+
+  labs(x = "Resource Condition", y= "Probability for high intensity aggression")+
   facet_grid(.~Group_Size, labeller = labeller(Group_Size = c("large" = "large groups", "small" = "small groups")))+
-  scale_x_discrete(labels=c("FC", "HQ", "CON"))+
+  scale_x_discrete(labels=c("HQ", "FC", "CON"))+
   theme_bw(base_size = 18)+
   theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank(), legend.position = "top")
 
 figIntensity = ggarrange(intensPlot1,intensPlot2, ncol = 2, labels = c("a)", "b)"), 
                             font.label=list(color="black",size=16))
 
-ggsave(path = "plots", "Test.tiff", figIntensity, "tiff", width = 38, height= 15, units = "cm", dpi = 300)
+ggsave(path = "plots", "Intensity2.tiff", figIntensity, "tiff", width = 38, height= 15, units = "cm", dpi = 300)
 
 
 #### Patterns of aggression ############
@@ -626,7 +662,8 @@ largePattern =
   labs(y = 'Loser rank', x= 'Winner rank')+
   theme_classic(base_size = 18)+
   facet_grid(. ~ Pen)+
-  geom_density_2d_filled(alpha = 0.7, contour_var = "ndensity", breaks = c(0, 0.2, 0.4, 0.6, 0.8, 1), show.legend = FALSE)+
+  geom_density_2d_filled(alpha = 0.7, contour_var = "ndensity", show.legend = FALSE, bins = 4)+
+  scale_fill_manual(values = c("white", "#FFEBCD", "gold", "darkorange"))+
   geom_abline(intercept = 0 , slope = 1, linetype = "dashed", colour = 'grey')+
   geom_jitter(size = 0.6, width = 0.4)+
   xlim(0.5,120)+
@@ -642,7 +679,8 @@ smallPattern =
   labs(y = 'Loser rank', x= 'Winner rank', shape = NULL, fill = "density \nrange")+
   theme(legend.position = "top")+
   facet_grid(. ~ Pen)+
-  geom_density_2d_filled(alpha = 0.7, contour_var = "ndensity", breaks = c(0, 0.2, 0.4, 0.6, 0.8, 1))+
+  geom_density_2d_filled(alpha = 0.7, contour_var = "ndensity",  bins = 4)+
+  scale_fill_manual(values = c("white", "#FFEBCD", "gold", "darkorange"))+
   geom_abline(intercept = 0 , slope = 1, linetype = "dashed", colour = 'grey')+
   geom_jitter(size = 0.8, width = 0.4)+
   xlim(0.5,20.5)+
@@ -654,9 +692,10 @@ smallPattern =
 # Example plot for Dynamics of interactions by rank 
 ggplot(data = RankTable[Pen == "E",], mapping = aes(x = WinnerRank, y =LoserRank)) + 
   #geom_smooth(se= FALSE)+#method = lm, formula = y ~ splines::bs(x, 3), se = FALSE)+
-  labs(y = 'Loser rank', x= 'Winner rank')+
+  labs(y = 'Loser rank', x= 'Winner rank', fill = "density \nrange")+
   theme_classic(base_size = 18)+
-  geom_density_2d_filled(alpha = 0.7, contour_var = "ndensity")+
+  geom_density_2d_filled(alpha = 0.7, contour_var = "ndensity", bins = 4)+
+  scale_fill_manual(values = c("white", "#FFEBCD", "gold", "darkorange"))+
   geom_abline(intercept = 0 , slope = 1, linetype = "dashed", colour = 'grey')+
   geom_jitter(size = 1.5, width = 0.4)+
   xlim(0.5,20.5)+
@@ -668,7 +707,7 @@ figPattern = ggarrange(largePattern,smallPattern, nrow = 2,
                             font.label=list(color="black",size=16),widths = c(1,0.7), legend = "top", 
                        align = "hv", legend.grob = legend)
 
-ggsave(path = "plots", "Pattern.tiff", figPattern, "tiff", width = 25, height= 23, units = "cm", dpi = 300)
+ggsave(path = "plots", "Pattern2.tiff", figPattern, "tiff", width = 25, height= 23, units = "cm", dpi = 300)
 
 
 #### Individual contacts data ######################################
@@ -744,10 +783,10 @@ p2 = ratingE$hierarchy_shape_rand$plot+
 
 ##### Examples of hierarchy plots #######
 
-mean.eloM = rowMeans(ratingF$randElo)
-identitiesM = rownames(ratingF$randElo)
+mean.eloM = rowMeans(ratingE$randElo)
+identitiesM = rownames(ratingE$randElo)
 identitiesM <- identitiesM[order(mean.eloM)]
-CIsM <- apply(ratingF$randElo,1,quantile,c(0.025,0.975),na.rm=TRUE)
+CIsM <- apply(ratingE$randElo,1,quantile,c(0.025,0.975),na.rm=TRUE)
 CIsM <- CIsM[,order(mean.eloM)]
 mean.eloM <- mean.eloM[order(mean.eloM)]
 
@@ -766,7 +805,7 @@ ggplot(plotTable1, aes(x = number, y= ranks))+
   #geom_text(
   #  label=plotTable$IDs,
   #  size = 4)+
-  labs(x = "Individuals", y="Dominance rank")+
+  labs(x = "Rank order", y="Elo rating")+
   theme_classic(base_size = 18)+
   theme(axis.text.x=element_blank(),
         axis.ticks.x=element_blank(),
@@ -791,11 +830,11 @@ plotTable2[, CIu := CIsM[2,]]
 ggplot(plotTable2, aes(x = number, y= ranks))+
   geom_errorbar(aes(x= number, ymin=CIl, ymax=CIu), width=.1)+
   geom_point( size = 2)+
-  #scale_y_continuous(limits = c(-450, 650))+
+  #scale_y_continuous(breaks = c(-400, 0, 400))+
   #geom_text(
   #  label=plotTable$IDs,
   #  size = 4)+
-  labs(x = "Individuals", y="Elo-rating")+
+  labs(x = "Rank order", y="Elo rating")+
   theme_classic(base_size = 18)+
   theme(axis.text.x=element_blank(),
         axis.ticks.x=element_blank()) 
@@ -804,29 +843,28 @@ ggplot(plotTable2, aes(x = number, y= ranks))+
 plotTable1[, Group_Size := "small"]
 plotTable2[, Group_Size := "large"]
 
-plotTable = rbind(plotTable1, plotTable2)
-plotTable$Group_Size = factor(plotTable$Group_Size, levels=c("small", "large"), labels = c("small group", "large group"))
-BCol = brewer.pal(n = 8, name = "Blues")[6]
-FCol = brewer.pal(n = 8, name = "OrRd")[8]
+plotTable = rbind(plotTable2, plotTable1)
+plotTable$Group_Size = factor(plotTable$Group_Size, levels=c("large","small"), labels = c( "large group","small group"))
+BCol = "#2F5597"
+FCol = "#E61C45"
 
 pp = ggplot(plotTable, aes(x = number, y= ranks, colour = Group_Size) )+
   geom_errorbar(aes(x= number, ymin=CIl, ymax=CIu), width=.1)+
   geom_point( size = 2)+
-  #scale_y_continuous(limits = c(-450, 650))+
+  scale_y_continuous(breaks = c(-600, -300, 0, 300, 600))+
   #geom_text(
   #  label=plotTable$IDs,
   #  size = 4)+
   facet_grid( . ~ Group_Size, scales = "free")+
-  scale_color_manual(values=c(FCol, BCol))+
-  labs(x = "Individuals", y="Dominance rank")+
-  scale_y_continuous(breaks=c(-400, 700),
-                     labels=c("low rank", "high rank"))+
+  scale_color_manual(values=c(BCol, FCol))+
+  labs(x = "Rank order", y="Elo rating")+
+  #scale_y_continuous(breaks=c(-400, 700),
+  #                   labels=c("low rank", "high rank"))+
   theme_bw(base_size = 18)+
   theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank())+
   theme(axis.text.x=element_blank(),
         axis.ticks.x=element_blank(),
-        axis.ticks.y=element_blank(),
-        axis.text.y = element_text(angle=90)) 
+        axis.ticks.y=element_blank()) 
 ggsave("HierarchyEx.tiff", pp, "tiff", width = 26, height = 10, units = "cm", dpi = 300)
 
 
