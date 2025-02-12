@@ -1,3 +1,22 @@
+#Some of the following functions have been adapted from functions written by 
+#Damien Farine & Alfredo Sanchez-Tojar for the AniDom package
+
+
+#function: dataset_diagnostics
+# calculates diagnostics for the input dataset
+# Input: dataset = social observation sequence (data.frame or data.table)
+#        Individuals = all existing individuals in the group (data.frame or data.table)
+# Outputs list of: 
+#        'seen_notSeen' = how many individuals were observed, how many were never observed  
+#        'tot_interact' = total number of interactions
+#        'ratio_interact' =  ratio of number of interactions divided by the amount of individuals observed (d/N)
+#        'prop_unknown' = the proportion of dyads in data set for which no interactions have been observed
+#        'prop_known' = the proportion of dyads in data set for which interactions have been observed
+#        'triang_trans' = Triangle Transitivity  as described in Shizuka & McDonald, 2012
+#        'focus_pos' = Focus and Position as described in Hobson et al., 2021
+#        'blur' = Downward null model as described in Hobson et al., 2021
+#        'strategy' = Pattern of aggression as described in Hobson et al., 2021
+
 dataset_diagnostics <- function(dataset, Individuals){
   
   winners = dataset$Winner
@@ -31,15 +50,22 @@ dataset_diagnostics <- function(dataset, Individuals){
   ttri = round(transitivity(as.matrix(data_matrix), runs = 1000),7)
   
   cat("Calculating Focus, Position and Strategy\n")
-   
-  input = dom_make_data(as.matrix(data_matrix))
-   
+  # based on patterns of aggression (Hobson et al., 2021) "domstruc" package
+  
+  # Compute bootstrap estimates of confidence intervals for focus and position 
+  # given an aggression matrix  
+  focus_pos = dom_make_data(as.matrix(data_matrix))
+  
+  #Compute bootstrap estimates of focus and position for the downward null model 
+  #with confidence intervals 
   blur = dom_make_blur_data(as.matrix(data_matrix))
-   
-  strategy = dom_categorize_strategy(input, blur, use_data_ci = TRUE)
+  
+  #Categorize group-level strategy -> pattern of aggression
+  strategy = dom_categorize_strategy(focus_pos, blur, use_data_ci = TRUE)
+  
   
   output = list(seen_notSeen, tot_interact, ratio_interact, prop_unknown, prop_known, 
-                ttri,input, blur, strategy)
+                ttri,focus_pos, blur, strategy)
   
   names(output) = c('seen_notSeen', 'tot_interact', 'ratio_interact', 'prop_unknown', 'prop_known', 
                     'triang_trans','focus_pos', 'blur', 'strategy')
@@ -47,6 +73,13 @@ dataset_diagnostics <- function(dataset, Individuals){
   return(output)
 }
 
+#function: proportion_of_known
+# calculates whether the observed proportion of known dyads lie within the range of what you would expect under a Poisson process
+# Input: input_matrix = social observation matrix
+# Outputs list of: 
+#        'exp_poiss' = expected proportion of known dyads under a Poisson process
+#        'exp_poiss_CI' = confidence inetravl of expected proportion
+#        'obs_known' =  the proportion of dyads in data set for which interactions have been observed
 
 proportion_of_known <- function(input_matrix) {
   
@@ -89,7 +122,6 @@ proportion_of_known <- function(input_matrix) {
   
   db.sim$knowndyads <- 1-db.sim$unknowndyad
   
-  
   exp_poiss = round(mean(db.sim$knowndyads),2)
   
   exp_poiss_CI = round(quantile(db.sim$knowndyads, probs = c(0.025, 0.975)), 2)
@@ -102,6 +134,26 @@ proportion_of_known <- function(input_matrix) {
   return(output)
   
 }
+
+#function: elo_analysis
+# calculates Elo ratings for the social interaction sequence and estimates uncertainty
+# Input: dataset = social observation sequence (data.frame or data.table)
+#        Individuals = all existing individuals in the group (data.frame or data.table)
+# Outputs list of: 
+#       'summary' = provides a summary of the input data
+#       'rating' = Elo rating in original order using AniDom package
+#       'hierarchy_shape' = plot of the hierarchy shape
+#       'uncer_repeat' = repeatability of Elo ratings
+#       'uncer_split'= median split performance
+#       'uncer_split_rand' = randomised split performance
+#       'rating_rand' = Elo rating based on randomised Elo ratings
+#       'comp_rating' = Spearman rank correlation based on original Elo ratings and randomised Elo ratings
+#       'comp_elos' = ICC of Elo ratings from original order data compared to Elo ratings from randomised order
+#       'hierarchy_shape_rand' =  plot of the hierarchy shape based on randomsied ELo ratings
+#       'Individuals' = optional data.table with details for the Individuals 
+#       'rankMatch' = optional data.table with details for the social interactions
+#       'randElo' = randomised Elo rating out in full (elo ratings for each randomisation) 
+
 
 elo_analysis = function(dataset, Individuals){
   
@@ -122,37 +174,31 @@ elo_analysis = function(dataset, Individuals){
   #                 Date = date,runcheck = TRUE, startvalue = 0, k = 200, presence = presence)#k = oK$best$k)
   origElo = elo.seq(winner = winners, loser = losers, 
                     Date = date,runcheck = TRUE, startvalue = 0, k = 200)
-  #index of hierarchy stability
-  summary = summary(origElo)
+  #print summary of input data
+  summary(origElo)
   
+  #using AniDom elo package
   newElo = elo_scores(winners=winners,losers=losers,
                     identities = Individuals, randomise=FALSE)
   
   rating = newElo[order(newElo[,1]),]
   
-  #if (all == TRUE){
-  #  traject = elo_scores(winners=winners,losers=losers,
-  #                       identities = Individuals, randomise=FALSE, return.trajectories = TRUE)
-    
-  #  traject_shape = plot_trajectories(traject, colors = topo.colors(length(Individuals)))+ abline(v = sum(date < "2021-07-19"), col = "red") 
-    
-  #} else { traject_shape = "irrelevant"}
- 
   #takes a set of winners and losers from observed interactions and plots the probability
   #of the dominant individual in an interaction winning given the difference in rank to the subordinate
   #in the same interaction.
   group.size = length(rating)
   
-  hierarchy_shape = my_plot_hierarchy_shape(identity= names(rating),
-                                             rank=length(rating):1,
-                                             winners=winners,
-                                             losers=losers,
-                                            group.size = group.size)
+  #hierarchy_shape = my_plot_hierarchy_shape(identity= names(rating),
+  #                                           rank=length(rating):1,
+  #                                           winners=winners,
+  #                                           losers=losers,
+  #                                          group.size = group.size)
   
   # estimates repeatability of Elo ratings -> 
-  #Our simulations suggest that a repeatability score above 0.8 suggests
+  # "Simulations suggest that a repeatability score above 0.8 suggests
   # a reasonably robust hierarchy, given a large input dataset 
-  #(can be unreliable for small datasets, i.e. < 10 observations per individual), or for extremely flat hierarchies
+  #(can be unreliable for small datasets, i.e. < 10 observations per individual), 
+  # or for extremely flat hierarchies"
   # from rptr Gaussian
   cat('Calculating uncertainity by repeatability\n')
   uncer_repeat = estimate_uncertainty_by_repeatability(winners, losers, 
@@ -185,6 +231,8 @@ elo_analysis = function(dataset, Individuals){
   
   rating_rand = rowMeans(randElo)
   rating_rand = rating_rand[order(rating_rand)]
+  
+  #deals with NA, which can interfere with rankings
   if (any(is.na(rating_rand))){
     ranking_rand = c((length(Individuals)-sum(is.na(rating_rand))):1, rep(NA, sum(is.na(rating_rand))))
     names(ranking_rand) = names(rating_rand)
@@ -193,11 +241,11 @@ elo_analysis = function(dataset, Individuals){
     names(ranking_rand) = names(rating_rand)
   }
  
-  hierarchy_shape_rand = my_plot_hierarchy_shape(identity= names(rating_rand),
-                                             rank=length(rating_rand):1,
-                                             winners=winners,
-                                             losers=losers,
-                                             group.size = group.size)
+  #hierarchy_shape_rand = my_plot_hierarchy_shape(identity= names(rating_rand),
+  #                                           rank=length(rating_rand):1,
+  #                                           winners=winners,
+  #                                           losers=losers,
+  #                                           group.size = group.size)
   
   # plotting ranks after randomised Elo with CI 
   #plot_ranks(randElo,plot.CIs=TRUE, ordered.by.rank = TRUE)
@@ -254,14 +302,15 @@ elo_analysis = function(dataset, Individuals){
 
   
 
-  output = list(summary,rating, hierarchy_shape,uncer_repeat,uncer_split,uncer_split_rand,
-                rating_rand,comp_rating, comp_elos,hierarchy_shape_rand, Individuals, rankMatch, randElo)
-  names(output) = c('summary','rating','hierarchy_shape','uncer_repeat','uncer_split','uncer_split_rand',
-                'rating_rand','comp_rating','comp_elos','hierarchy_shape_rand', 'Individuals', 'rankMatch', 'randElo')
+  output = list(origElo,rating, uncer_repeat,uncer_split,uncer_split_rand,
+                rating_rand,comp_rating, comp_elos, Individuals, rankMatch, randElo)
+  names(output) = c('Elo_object','rating','uncer_repeat','uncer_split','uncer_split_rand',
+                'rating_rand','comp_rating','comp_elos', 'Individuals', 'rankMatch', 'randElo')
 
   return(output)
 }
 
+#function to estimate uncertainty based on a median split
 estimate_uncertainty_by_median_splitting <-
   function(winners, losers, identities=NULL, sigmoid.param=1/100, K=200, init.score=0, randomise=FALSE) {
     
@@ -286,164 +335,108 @@ estimate_uncertainty_by_median_splitting <-
     
   }
 
-outlier_animals <-
-  function(Individuals, Agr = TRUE){
-    
-    if (Agr == TRUE){
-      m = mean(Individuals$scaleWins)
-      sd = sd(Individuals$scaleWins)
-      Output = Individuals[scaleWins > (m + 2*sd),]
-    }else{
-      m = mean(Individuals$scaleLosses)
-      sd = sd(Individuals$scaleLosses)
-      Output = Individuals[scaleLosses > (m + 2*sd),]
-    }
+#OLD version to calculate steepness -> instead used EloSteepness package
+#function to create hierarchy shape plots and to calculate the steepness of the hierarchy
+#takes a set of winners and losers from observed interactions and plots the probability
+#of the dominant individual in an interaction winning given the difference in rank to the subordinate
+#in the same interaction.
+# Outputs list of:
+#     plot =  plot of the shape
+#     data = data.table of data used for plot
+#     rate = steepness k of the hierarchy 
+#     confint_Rate = 95 % confidence interval for steepness
 
-    return(Output) 
-  }
+# my_plot_hierarchy_shape <-
+#   function(identity, rank, winners, losers, group.size, standard = 10) {
+#     
+#     winners.rank <- rank[match(winners,identity)]
+#     losers.rank <- rank[match(losers,identity)]
+#     xx <- winners.rank-losers.rank
+#     x <- 1:(max(abs(xx)))
+#     y <- rep(NA,length(x))
+#     totInteract <- rep(NA,length(x))
+#     sumHighWin <- rep(NA,length(x))
+#     CI.upper <- y
+#     CI.lower <- y
+#     for (i in 1:length(x)) {
+#       totInteract[i] = sum(abs(xx)==x[i])
+#       sumHighWin[i] = sum(xx==-x[i])
+#       y[i] <- sumHighWin[i]/totInteract[i]
+#       CI.upper[i] <- y[i] + sqrt(y[i]*(1-y[i])/sum(abs(xx)==x[i])) + 0.5/sum(abs(xx)==x[i])
+#       CI.upper[i] <- min(CI.upper[i],1)
+#       CI.lower[i] <- y[i] - sqrt(y[i]*(1-y[i])/sum(abs(xx)==x[i])) - 0.5/sum(abs(xx)==x[i])
+#       CI.lower[i] <- max(CI.lower[i],0)
+#     }
+#     CI.upper <- CI.upper[!is.na(y)]
+#     CI.lower <- CI.lower[!is.na(y)]
+#     x <- x[!is.na(y)]
+#     y <- y[!is.na(y)]
+#     totInteract <- totInteract[!is.na(totInteract)]
+#     
+#     a = standard
+#     
+#     #old formula
+#     #logisticModel <- nls(y~1/(1+exp(-1*(a/group.size)*r*x)), # -1 to keep growth rate positive, a/N as  
+#     #start=list(r=-1), 
+#     #control=list(maxiter=1000, minFactor=.00000000001))
+#     
+#     #to standardise all rank differences to a scale from 1 to 10
+#     #include difference of 0 
+#     x = c(0,x)
+#     standard_X = (x-min(x))/(max(x)-min(x))*10
+#     #baseline-probability that higher ranking individual wins -> b = 0, probability = 0.5
+#     b = 0
+#     base_prob = 1/(1+exp(b)) 
+#     y = c(base_prob, y)
+#     logisticModel <- nls(y~1/(1+exp(-1*r*standard_X + b)), # -1 to keep growth rate positive, a/N as  
+#                          start=list(r=-1), 
+#                          control=list(maxiter=1000, minFactor=.00000000001))
+#     
+#     
+#     growth.rate = coef(logisticModel)
+#     library(nlstools)
+#     
+#     if(sum(y<1)/length(y) > 0.2){
+#       confint_Rate = confint2(logisticModel, method = "asymptotic")
+#     }else { confint_Rate = "Not computable, more than 80% > 1"}
+#     
+#     
+#     plotdata = data.table(RankDiff = x[-1], ProbWin = y[-1], Predict = predict(logisticModel)[-1])
+#     
+#     if(length(x) %% 2 == 0){
+#       breaks.x = seq(2,length(x),2)
+#     }else{breaks.x = seq(1,length(x),2)}
+#     
+#     library(scales)
+#     plot = ggplot(plotdata, aes(x = RankDiff, y= ProbWin))+
+#       geom_point(size = 3)+
+#       #geom_smooth(aes(col = 'loess fit'), method = 'loess', formula = y~x, size = 1.5, se = FALSE)+
+#       geom_errorbar(aes(x= RankDiff, ymin=CI.lower, ymax=CI.upper), width=.1)+
+#       geom_line(aes(x=RankDiff, y=Predict, color = "logistic fit"), size =1.5)+
+#       labs(colour = "Fit function")+
+#       scale_y_continuous(limits=c(0.35,1),oob = rescale_none)+
+#       scale_x_continuous(breaks = breaks.x)+
+#       theme_bw(base_size = 18)+
+#       theme(axis.title.x = element_blank(), axis.title.y = element_blank())
+#     
+#     invisible(list(plot = plot, 
+#                    data = data.table(tot.Interact = totInteract,
+#                                      Rank.diff=x[-1],Prob.dom.win=y[-1],
+#                                      CI.upper=CI.upper,CI.lower=CI.lower),
+#                    rate = growth.rate,
+#                    confint_Rate = confint_Rate
+#     ))
+#     
+#   }
 
 
-my_plot_hierarchy_shape <-
-  function(identity, rank, winners, losers, group.size, standard = 10) {
-    
-    winners.rank <- rank[match(winners,identity)]
-    losers.rank <- rank[match(losers,identity)]
-    xx <- winners.rank-losers.rank
-    x <- 1:(max(abs(xx)))
-    y <- rep(NA,length(x))
-    totInteract <- rep(NA,length(x))
-    sumHighWin <- rep(NA,length(x))
-    CI.upper <- y
-    CI.lower <- y
-    for (i in 1:length(x)) {
-      totInteract[i] = sum(abs(xx)==x[i])
-      sumHighWin[i] = sum(xx==-x[i])
-      y[i] <- sumHighWin[i]/totInteract[i]
-      CI.upper[i] <- y[i] + sqrt(y[i]*(1-y[i])/sum(abs(xx)==x[i])) + 0.5/sum(abs(xx)==x[i])
-      CI.upper[i] <- min(CI.upper[i],1)
-      CI.lower[i] <- y[i] - sqrt(y[i]*(1-y[i])/sum(abs(xx)==x[i])) - 0.5/sum(abs(xx)==x[i])
-      CI.lower[i] <- max(CI.lower[i],0)
-    }
-    CI.upper <- CI.upper[!is.na(y)]
-    CI.lower <- CI.lower[!is.na(y)]
-    x <- x[!is.na(y)]
-    y <- y[!is.na(y)]
-    totInteract <- totInteract[!is.na(totInteract)]
-    
-    a = standard
-    
-    #old formula
-    #logisticModel <- nls(y~1/(1+exp(-1*(a/group.size)*r*x)), # -1 to keep growth rate positive, a/N as  
-    #start=list(r=-1), 
-    #control=list(maxiter=1000, minFactor=.00000000001))
-    
-    #to standardise all rank differences to a scale from 1 to 10
-    #include difference of 0 
-    x = c(0,x)
-    standard_X = (x-min(x))/(max(x)-min(x))*10
-    #baseline-probability that higher ranking individual wins -> b = 0, probability = 0.5
-    b = 0
-    base_prob = 1/(1+exp(b)) 
-    y = c(base_prob, y)
-    logisticModel <- nls(y~1/(1+exp(-1*r*standard_X + b)), # -1 to keep growth rate positive, a/N as  
-                         start=list(r=-1), 
-                         control=list(maxiter=1000, minFactor=.00000000001))
-    
-    
-    growth.rate = coef(logisticModel)
-    library(nlstools)
-    
-    if(sum(y<1)/length(y) > 0.2){
-      confint_Rate = confint2(logisticModel, method = "asymptotic")
-    }else { confint_Rate = "Not computable, more than 80% > 1"}
-    
-    
-    plotdata = data.table(RankDiff = x[-1], ProbWin = y[-1], Predict = predict(logisticModel)[-1])
-    
-    if(length(x) %% 2 == 0){
-      breaks.x = seq(2,length(x),2)
-    }else{breaks.x = seq(1,length(x),2)}
-    
-    library(scales)
-    plot = ggplot(plotdata, aes(x = RankDiff, y= ProbWin))+
-      geom_point(size = 3)+
-      #geom_smooth(aes(col = 'loess fit'), method = 'loess', formula = y~x, size = 1.5, se = FALSE)+
-      geom_errorbar(aes(x= RankDiff, ymin=CI.lower, ymax=CI.upper), width=.1)+
-      geom_line(aes(x=RankDiff, y=Predict, color = "logistic fit"), size =1.5)+
-      labs(colour = "Fit function")+
-      scale_y_continuous(limits=c(0.35,1),oob = rescale_none)+
-      scale_x_continuous(breaks = breaks.x)+
-      theme_bw(base_size = 18)+
-      theme(axis.title.x = element_blank(), axis.title.y = element_blank())
-    
-    invisible(list(plot = plot, 
-                   data = data.table(tot.Interact = totInteract,
-                                     Rank.diff=x[-1],Prob.dom.win=y[-1],
-                                     CI.upper=CI.upper,CI.lower=CI.lower),
-                   rate = growth.rate,
-                   confint_Rate = confint_Rate
-    ))
-    
-  }
-
-my_plot_ranks <- function(ranks, ordered.by.rank=TRUE,identities=NULL,colors=NULL) {
-  
-  ranks <- apply(ranks,2,function(x) { rank(-x) })
-  
-  if (is.null(identities)) {
-    identities <- rownames(ranks)
-  }
-  
-  if (dim(ranks)[2] > 1) {
-    mean.ranks <- rowMeans(ranks)
-  } else {
-    mean.ranks <- ranks
-  }
-  
-  if (is.null(colors)) {
-    colors <- rep("black",length(identities))
-  }
-  
-  if (ordered.by.rank==TRUE) {
-    colors <- colors[order(mean.ranks)]
-    identities <- identities[order(mean.ranks)]
-    if (plot.CIs==TRUE) {
-      CIs <- apply(ranks,1,quantile,c(0.025,0.975),na.rm=TRUE)
-      CIs <- CIs[,order(mean.ranks)]
-    }
-    mean.ranks <- mean.ranks[order(mean.ranks)]
-  } else {
-    if (plot.CIs==TRUE) {
-      CIs <- apply(ranks,1,quantile,c(0.025,0.975),na.rm=TRUE)
-    }
-  }
-  
-  x <- 1:length(identities)
-  
-  plotTable = data.table(number = x,  
-                         ranks = mean.ranks,
-                         IDs = identities
-                         )
-  
-    plot = ggplot(plotTable, aes(x = number, y= ranks))+
-            geom_errorbar(aes(x= x, ymin=CIs[1,], ymax=CIs[2,]), width=.1, col = colors)+
-            geom_point(shape = 21, size = 12, colour = "white", fill = "white", stroke = 1)+
-            
-      geom_text(
-        label=plotTable$IDs,
-         size = 4)+
-            labs(y="Dominance rank")+
-            theme_classic(base_size = 18)+
-      theme(axis.text.x=element_blank(),
-            axis.ticks.x=element_blank(),
-            axis.title.x = element_blank())
-
-  return(plot)
-}
+# function to have a look at the elo_analysis outcome in a better formatting
+# takes the result of elo_analysis and outputs as formatted text in the console
 
 printCalculations <- function(rating){
-  cat("Summary:\n",rating$summary)
-  cat("\n \n Steepness:\n", rating$hierarchy_shape$rate, "Confint:",rating$hierarchy_shape$confint_Rate)
+  cat("Summary:\n")
+  summary(rating$Elo_object)
+  #cat("\n \n Steepness:\n", rating$hierarchy_shape$rate, "Confint:",rating$hierarchy_shape$confint_Rate)
   cat("\n \n Repeatability:\n", rating$uncer_repeat)
   cat("\n \n Median split:\n")
   print(rating$uncer_split)
@@ -451,19 +444,30 @@ printCalculations <- function(rating){
   cat("\n \n Comparison Original and Randomised:\n") 
   print(rating$comp_rating)
   print(rating$comp_elos)
-  cat("\n \n Randomised Elo: \n")
-  cat("\n Steepness:\n", rating$hierarchy_shape_rand$rate, "Confint:",rating$hierarchy_shape_rand$confint_Rate)
+  #cat("\n \n Randomised Elo: \n")
+  #cat("\n Steepness:\n", rating$hierarchy_shape_rand$rate, "Confint:",rating$hierarchy_shape_rand$confint_Rate)
 }
 
-# needed for plot strategy
+
+# Function to plot focus and position plots
+# adjusted from https://rdrr.io/github/danm0nster/domstruc/src/R/plotting.R
+
 library(alphahull)
 library(scales)
-source('plot_utils.R')
 
-my_dom_plot_strategy <- function(data, blur_data, show_data_ci = FALSE) {
-
-  
-
+#' Plot focus, position and show strategy regions based on downward null
+#' heuristic.
+#'
+#' @param data A data frame containing one row with columns `focus` and `position`
+#' @param blur_data A data frame that is created by `dom_make_blur_data()`
+#'
+#' @return
+#' @export
+#'
+#' @examples
+adj_dom_plot_strategy <- function(data, blur_data, show_data_ci = FALSE, show_legend = FALSE) {
+  # TODO: Check input data is in the right format (option to not have ci in data if show_data_ci == FALSE)
+  # Get convex hull of blur data with error bars
   ahuld.conv <- convex_hull(blur_data)
   
   polygons <- make_polygons(blur_data)
@@ -476,53 +480,56 @@ my_dom_plot_strategy <- function(data, blur_data, show_data_ci = FALSE) {
   with(data, plot(focus, position,
                   ylim = c(-0.1, 1), xlim = c(-0.1, 1), las = 1,
                   col = "blue", pch = 5,
-                  xlab = "focus", ylab = "position"
+                  xlab = "focus", ylab = "position", cex = 2
+                  
   ))
   
   # Add strategy polygons to bottom plotted layer
   # undefined (light grey)
-  polygon(undef.poly, col = scales::alpha("white", 0.1),
+  polygon(undef.poly, col = scales::alpha("grey", 0.4),
           border = scales::alpha("black", 0.5), lty = 2, lwd = 1.5)
   
   # bully (blue)
-  polygon(bully.poly, col = scales::alpha("blue", 0.3),
+  polygon(bully.poly, col = scales::alpha("blue", 0.2),
           border = scales::alpha("black", 0.5), lty = 2, lwd = 1.5)
   
   # close competitors (red)
-  polygon(clcomps.poly, col = scales::alpha("red", 0.3),
+  polygon(clcomps.poly, col = scales::alpha("red", 0.2),
           border = scales::alpha("black", 0.5), lty = 2, lwd = 1.5)
   
   # downward heuristic (black, plotted over white)
-  polygon(ahuld.conv, col = scales::alpha("white", 1),
-          border = scales::alpha("white", 1), lwd = 1.5) # overplot other strategies first
-  polygon(ahuld.conv, col = scales::alpha("black", 0.05),
+  polygon(ahuld.conv, col = scales::alpha("white", 1), lty = 2, lwd = 1.5) # plot white without border
+  polygon(ahuld.conv, col = scales::alpha("black", 0), # plot black border only
           border = scales::alpha("black", 0.4), lwd = 1.5)
   
   
-  # legend("bottomright",
-  #        c(
-  #          "Downward heuristic",
-  #          "Bullying",
-  #          "Close competitors",
-  #          "Undefined"
-  #        ),
-  #        # bty="n",
-  #        col = "black",
-  #        pt.bg = c(
-  #          scales::alpha("black", 0.2),
-  #          scales::alpha("blue", 0.2),
-  #          scales::alpha("red", 0.2),
-  #          scales::alpha("grey", 0.2)
-  #        ),
-  #        pch = 22, cex = 1, pt.cex = 2
-  # )
+  if(show_legend){
+    legend("bottomright",
+           c(
+             "Downward heuristic",
+             "Bullying",
+             "Close competitors",
+             "Undefined"
+           ),
+           # bty="n",
+           col = "black",
+           pt.bg = c(
+             scales::alpha("black", 0.2),
+             scales::alpha("blue", 0.2),
+             scales::alpha("red", 0.2),
+             scales::alpha("grey", 0.2)
+           ),
+           pch = 22, cex = 1, pt.cex = 1.5
+    )
+  }
+  
   # add points and segments to upper layer
   
   # plot line for increasingly blurred downward heuristic, text above top of high position errorbars
   lines(x = blur_data$focus, y = blur_data$position)
   points(x = blur_data$focus, y = blur_data$position)
-  #text(x = blur_data$focus, y = blur_data$position_ci_hi + 0.025,
-  #     label = blur_data$blur, cex = 0.6)
+  text(x = blur_data$focus, y = blur_data$position_ci_hi + 0.025,
+       label = blur_data$blur, cex = 0.6)
   
   # horizontal focus error, at blurred position
   graphics::segments(
