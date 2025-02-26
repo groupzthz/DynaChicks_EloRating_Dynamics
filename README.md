@@ -32,7 +32,7 @@ Data and analysis scripts for the paper: "Social structure and interactions of l
 
 ### used for **Fear_Recognition_Badges.R**:
 
-3. **ArenaTest*.csv**  
+3. **ArenaTest\*.csv**  
    Contains the data collected for the fear (Test 1) and the recognition (Test 2) test, as well as other parameters for the birds.  
    Only columns used in the present study are listed. If they exist in only one of the two files, they are numbered.   
 
